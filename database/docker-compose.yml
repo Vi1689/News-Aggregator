@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:14
+    container_name: postgres_checksum_cluster
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: mypassword
+      POSTGRES_DB: postgres
+      POSTGRES_INITDB_ARGS: "--data-checksums"
+    ports:
+      - "5432:5432"
+    volumes:
+      - /media/vitalii/medio/study/Programm/database/postgres_data:/var/lib/postgresql/data
+      - ./demo-big-20170815.sql:/docker-entrypoint-initdb.d/demo.sql
+
+volumes:
+  postgres_data:
