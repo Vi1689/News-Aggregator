@@ -71,6 +71,11 @@ func main() {
 				for k, comment := range commentsSlice {
 					fmt.Printf("=================================%d. %s %s\n", k+1, comment.AuthorName, comment.Text)
 				}
+				MediaSlice, _ := vk.GetMediaFromPosts(string(accessToken), post.AuthorID, conf.Media_limit)
+				// отправить на севрер
+				for k, mediaInfo := range MediaSlice {
+					fmt.Printf("---------------------%d. %s %s\n", k+1, mediaInfo.Type, mediaInfo.URL)
+				}
 			}
 
 			// получить медиа
