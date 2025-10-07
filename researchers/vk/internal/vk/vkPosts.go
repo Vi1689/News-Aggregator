@@ -10,21 +10,32 @@ import (
 	"time"
 )
 
-// Структура для поста (упрощённая, с базовыми полями)
+// Расширенная структура для поста
 type VKPost struct {
-	ID       int    `json:"id"`
-	Text     string `json:"text"`
-	Date     int    `json:"date"` // Unix timestamp
-	Likes    int    `json:"likes_count"`
-	Reposts  int    `json:"reposts_count"`
-	Comments int    `json:"comments_count"`
+	ID         int    `json:"id"`
+	Text       string `json:"text"`
+	Date       int    `json:"date"` // Unix timestamp
+	Likes      int    `json:"likes_count"`
+	Reposts    int    `json:"reposts_count"`
+	Comments   int    `json:"comments_count"`
+	AuthorID   int    `json:"from_id"` // ID автора (пользователь или группа)
+	AuthorName string // Имя автора (заполнится автоматически)
 }
 
-// Структура ответа от VK API для wall.get
+// Структура ответа от VK API для wall.get с extended=1
 type VKWallResponse struct {
 	Response struct {
-		Count int      `json:"count"`
-		Items []VKPost `json:"items"`
+		Count    int      `json:"count"`
+		Items    []VKPost `json:"items"`
+		Profiles []struct {
+			ID        int    `json:"id"`
+			FirstName string `json:"first_name"`
+			LastName  string `json:"last_name"`
+		} `json:"profiles"`
+		Groups []struct {
+			ID   int    `json:"id"`
+			Name string `json:"name"`
+		} `json:"groups"`
 	} `json:"response"`
 }
 
@@ -57,8 +68,8 @@ func GetGroupPosts(accessToken string, groupID int, count int) ([]VKPost, error)
 		params.Set("owner_id", "-"+strconv.Itoa(groupID)) // ID группы с минусом
 		params.Set("count", strconv.Itoa(currentCount))
 		params.Set("offset", strconv.Itoa(offset))
-		params.Set("extended", "0")                    // Без расширенной информации (для простоты)
-		params.Set("fields", "likes,reposts,comments") // Поля для постов
+		params.Set("extended", "1")                       // Расширенная информация
+		params.Set("fields", "first_name,last_name,name") // Поля для профилей и групп
 
 		// Формируем полный URL
 		fullURL := baseURL + "?" + params.Encode()
@@ -93,10 +104,32 @@ func GetGroupPosts(accessToken string, groupID int, count int) ([]VKPost, error)
 			return nil, fmt.Errorf("ошибка парсинга JSON: %w", err)
 		}
 
+		// Создаём мапы для имён: профили (положительные ID) и группы (отрицательные ID)
+		profilesMap := make(map[int]string)
+		for _, p := range vkResp.Response.Profiles {
+			profilesMap[p.ID] = p.FirstName + " " + p.LastName
+		}
+		groupsMap := make(map[int]string)
+		for _, g := range vkResp.Response.Groups {
+			groupsMap[-g.ID] = g.Name // Группы имеют отрицательные ID в from_id
+		}
+
+		// Заполняем AuthorName для каждого поста
+		for i := range vkResp.Response.Items {
+			post := &vkResp.Response.Items[i]
+			if name, ok := profilesMap[post.AuthorID]; ok {
+				post.AuthorName = name
+			} else if name, ok := groupsMap[post.AuthorID]; ok {
+				post.AuthorName = name
+			} else {
+				post.AuthorName = "Неизвестный автор" // Если не найден
+			}
+		}
+
 		fmt.Printf("Получено постов в этом запросе: %d\n", len(vkResp.Response.Items))
 		for i, p := range vkResp.Response.Items {
-			fmt.Printf("  Пост %d: ID=%d, Текст='%s', Дата=%d, Лайки=%d, Репосты=%d, Комменты=%d\n",
-				offset+i+1, p.ID, p.Text, p.Date, p.Likes, p.Reposts, p.Comments)
+			fmt.Printf("  Пост %d: ID=%d, АвторID=%d, Автор='%s', Текст='%s', Дата=%d, Лайки=%d, Репосты=%d, Комменты=%d\n",
+				offset+i+1, p.ID, p.AuthorID, p.AuthorName, p.Text, p.Date, p.Likes, p.Reposts, p.Comments)
 		}
 
 		// Добавляем посты в общий слайс
