@@ -11,12 +11,16 @@ import (
 	"time"
 )
 
-// Структура для группы (упрощённая)
+// Структура для группы (расширенная с администраторами)
 type VKGroup struct {
-	ID           int    `json:"id"`
-	Name         string `json:"name"`
-	ScreenName   string `json:"screen_name"`
-	MembersCount int    `json:"members_count"`
+	ID           int        `json:"id"`
+	Name         string     `json:"name"`
+	ScreenName   string     `json:"screen_name"`
+	MembersCount int        `json:"members_count"`
+	Contacts     []struct { // Администраторы/контакты группы
+		UserID int    `json:"user_id"`
+		Desc   string `json:"desc"`
+	} `json:"contacts"`
 }
 
 // Структура ответа от VK API
@@ -48,12 +52,12 @@ func GetTopPopularGroups(accessToken string, n int) ([]VKGroup, error) {
 	// Параметры запроса
 	params := url.Values{}
 	params.Set("access_token", accessToken)
-	params.Set("v", "5.131")                               // Версия API
-	params.Set("q", "")                                    // Пустой запрос для поиска всех групп
-	params.Set("type", "group")                            // Тип: группы
-	params.Set("sort", "6")                                // Сортировка: по количеству участников (убывание)
-	params.Set("count", strconv.Itoa(n))                   // Количество результатов
-	params.Set("fields", "members_count,name,screen_name") // Поля для получения (включая members_count)
+	params.Set("v", "5.131")                                        // Версия API
+	params.Set("q", "")                                             // Пустой запрос для поиска всех групп
+	params.Set("type", "group")                                     // Тип: группы
+	params.Set("sort", "6")                                         // Сортировка: по количеству участников (убывание)
+	params.Set("count", strconv.Itoa(n))                            // Количество результатов
+	params.Set("fields", "members_count,name,screen_name,contacts") // Поля для получения (добавлено contacts)
 
 	// Формируем полный URL
 	fullURL := baseURL + "?" + params.Encode()
@@ -114,11 +118,11 @@ func GetGroupsByFullNames(accessToken string, names string, n int) ([]VKGroup, e
 		// Параметры запроса
 		params := url.Values{}
 		params.Set("access_token", accessToken)
-		params.Set("v", "5.131")                               // Версия API
-		params.Set("q", fullName)                              // Запрос по названию
-		params.Set("type", "group")                            // Тип: группы
-		params.Set("count", "20")                              // До 20 результатов на запрос
-		params.Set("fields", "members_count,name,screen_name") // Поля
+		params.Set("v", "5.131")                                        // Версия API
+		params.Set("q", fullName)                                       // Запрос по названию
+		params.Set("type", "group")                                     // Тип: группы
+		params.Set("count", "20")                                       // До 20 результатов на запрос
+		params.Set("fields", "members_count,name,screen_name,contacts") // Поля (добавлено contacts)
 
 		// Формируем полный URL
 		fullURL := baseURL + "?" + params.Encode()
