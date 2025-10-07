@@ -6,7 +6,9 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -21,6 +23,7 @@ type VKPost struct {
 	AuthorID    int                      `json:"from_id"` // ID автора (пользователь или группа)
 	AuthorName  string                   // Имя автора (заполнится автоматически)
 	Attachments []map[string]interface{} `json:"attachments,omitempty"` // Добавлено: массив вложений (фото, видео и т.д.)
+	Tags        []string                 // Добавлено: массив хэштегов (извлекается из текста)
 }
 
 // Структура ответа от VK API для wall.get с extended=1
@@ -38,6 +41,19 @@ type VKWallResponse struct {
 			Name string `json:"name"`
 		} `json:"groups"`
 	} `json:"response"`
+}
+
+// Функция для извлечения хэштегов из текста
+func extractTags(text string) []string {
+	re := regexp.MustCompile(`#\w+`)
+	matches := re.FindAllString(text, -1)
+	var tags []string
+	for _, match := range matches {
+		// Убираем # и приводим к нижнему регистру для нормализации
+		tag := strings.TrimPrefix(match, "#")
+		tags = append(tags, strings.ToLower(tag))
+	}
+	return tags
 }
 
 // Функция для получения заданного количества постов группы
@@ -115,7 +131,7 @@ func GetGroupPosts(accessToken string, groupID int, count int) ([]VKPost, error)
 			groupsMap[-g.ID] = g.Name // Группы имеют отрицательные ID в from_id
 		}
 
-		// Заполняем AuthorName для каждого поста
+		// Заполняем AuthorName и Tags для каждого поста
 		for i := range vkResp.Response.Items {
 			post := &vkResp.Response.Items[i]
 			if name, ok := profilesMap[post.AuthorID]; ok {
@@ -125,6 +141,8 @@ func GetGroupPosts(accessToken string, groupID int, count int) ([]VKPost, error)
 			} else {
 				post.AuthorName = "Неизвестный автор" // Если не найден
 			}
+			// Извлекаем теги из текста
+			post.Tags = extractTags(post.Text)
 		}
 
 		// Добавляем посты в общий слайс
