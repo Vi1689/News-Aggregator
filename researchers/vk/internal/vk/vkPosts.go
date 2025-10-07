@@ -126,12 +126,6 @@ func GetGroupPosts(accessToken string, groupID int, count int) ([]VKPost, error)
 			}
 		}
 
-		fmt.Printf("Получено постов в этом запросе: %d\n", len(vkResp.Response.Items))
-		for i, p := range vkResp.Response.Items {
-			fmt.Printf("  Пост %d: ID=%d, АвторID=%d, Автор='%s', Текст='%s', Дата=%d, Лайки=%d, Репосты=%d, Комменты=%d\n",
-				offset+i+1, p.ID, p.AuthorID, p.AuthorName, p.Text, p.Date, p.Likes, p.Reposts, p.Comments)
-		}
-
 		// Добавляем посты в общий слайс
 		allPosts = append(allPosts, vkResp.Response.Items...)
 
@@ -147,6 +141,5 @@ func GetGroupPosts(accessToken string, groupID int, count int) ([]VKPost, error)
 		time.Sleep(100 * time.Millisecond)
 	}
 
-	fmt.Printf("Всего получено постов: %d\n", len(allPosts))
 	return allPosts, nil
 }
