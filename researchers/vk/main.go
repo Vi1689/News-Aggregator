@@ -51,14 +51,14 @@ func main() {
 		}
 
 		// сгенерировать список групп
-		var groupSlice []vk.VKGroup
-		groupSlice, err = MakeGroupsSlice(string(accessToken), conf)
+		var groupsSlice []vk.VKGroup
+		groupsSlice, err = MakeGroupsSlice(string(accessToken), conf)
 		if err != nil {
 			fmt.Println(err)
 			os.Exit(1)
 		}
 
-		for i, group := range groupSlice {
+		for i, group := range groupsSlice {
 			fmt.Printf("%d. %s (ID: %d, Участников: %d)\n", i+1, group.Name, group.ID, group.MembersCount)
 			// получить post_limit постов
 			postsSlice, _ := vk.GetGroupPosts(string(accessToken), group.ID, conf.Post_limit)
@@ -66,6 +66,11 @@ func main() {
 			for j, post := range postsSlice {
 				fmt.Printf("%d. %s [%d] %d\n", j+1, post.Text, post.Comments, post.Likes)
 				// получить комментарии
+				commentsSlice, _ := vk.GetCommentsWithThreads(string(accessToken), post.AuthorID, post.ID, conf.Comment_limit)
+				// отправить на сервер
+				for k, comment := range commentsSlice {
+					fmt.Printf("=================================%d. %s %s\n", k+1, comment.AuthorName, comment.Text)
+				}
 			}
 
 			// получить медиа
