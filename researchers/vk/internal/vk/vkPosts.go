@@ -12,14 +12,15 @@ import (
 
 // Расширенная структура для поста
 type VKPost struct {
-	ID         int    `json:"id"`
-	Text       string `json:"text"`
-	Date       int    `json:"date"` // Unix timestamp
-	Likes      int    `json:"likes_count"`
-	Reposts    int    `json:"reposts_count"`
-	Comments   int    `json:"comments_count"`
-	AuthorID   int    `json:"from_id"` // ID автора (пользователь или группа)
-	AuthorName string // Имя автора (заполнится автоматически)
+	ID          int                      `json:"id"`
+	Text        string                   `json:"text"`
+	Date        int                      `json:"date"` // Unix timestamp
+	Likes       int                      `json:"likes_count"`
+	Reposts     int                      `json:"reposts_count"`
+	Comments    int                      `json:"comments_count"`
+	AuthorID    int                      `json:"from_id"` // ID автора (пользователь или группа)
+	AuthorName  string                   // Имя автора (заполнится автоматически)
+	Attachments []map[string]interface{} `json:"attachments,omitempty"` // Добавлено: массив вложений (фото, видео и т.д.)
 }
 
 // Структура ответа от VK API для wall.get с extended=1
