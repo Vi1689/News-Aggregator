@@ -1,103 +1,401 @@
-#include <iostream>
-#include <string>
-#include <cstdlib>
-#include <pqxx/pqxx>
-#include <sw/redis++/redis++.h>
-#include <httplib.h>
+// #include "httplib.h"
+#include "/media/vitalii/medio/study/News-Aggregator/cpp-httplib/httplib.h"
 #include <nlohmann/json.hpp>
+#include <pqxx/pqxx>
+#include <queue>
+#include <string>
 
-using namespace sw::redis;
+using json = nlohmann::json;
+
+class PgPool {
+public:
+  PgPool(const std::string &conninfo, size_t pool_size = 4)
+      : conninfo_(conninfo) {
+    for (size_t i = 0; i < pool_size; ++i) {
+      auto conn = std::make_shared<pqxx::connection>(conninfo_);
+      if (!conn->is_open()) {
+        throw std::runtime_error("Failed to open DB connection in pool");
+      }
+      pool_.push(conn);
+    }
+  }
+
+  struct PConn {
+    std::shared_ptr<pqxx::connection> conn;
+    PgPool *pool;
+    ~PConn() {
+      if (conn && pool)
+        pool->release(conn);
+    }
+  };
+
+  PConn acquire() {
+    std::unique_lock<std::mutex> lk(mutex_);
+    cv_.wait(lk, [&] { return !pool_.empty(); });
+    auto conn = pool_.front();
+    pool_.pop();
+    return PConn{conn, this};
+  }
+
+private:
+  void release(std::shared_ptr<pqxx::connection> conn) {
+    std::unique_lock<std::mutex> lk(mutex_);
+    pool_.push(conn);
+    lk.unlock();
+    cv_.notify_one();
+  }
+
+  std::string conninfo_;
+  std::queue<std::shared_ptr<pqxx::connection>> pool_;
+  std::mutex mutex_;
+  std::condition_variable cv_;
+};
+
+const std::string CONN_STR = "host=db "
+                             "port=5432 "
+                             "dbname=news_db "
+                             "user=news_user "
+                             "password=news_pass";
+
+const std::unordered_map<std::string, std::string> pk_map = {
+    {"users", "user_id"},       {"authors", "author_id"},
+    {"news_texts", "text_id"},  {"sources", "source_id"},
+    {"channels", "channel_id"}, {"posts", "post_id"},
+    {"media", "media_id"},      {"tags", "tag_id"},
+    {"comments", "comment_id"}};
+
+const std::vector<std::string> valid_tables = {
+    "users", "authors", "news_texts", "sources",   "channels",
+    "posts", "media",   "tags",       "post_tags", "comments"};
+
+bool is_valid_table(const std::string &t) {
+  for (const auto &x : valid_tables)
+    if (x == t)
+      return true;
+  return false;
+}
 
 int main() {
-    try {
-        // Получаем настройки из переменных окружения
-        const char* db_host = std::getenv("DB_HOST");
-        const char* db_port = std::getenv("DB_PORT");
-        const char* db_name = std::getenv("DB_NAME");
-        const char* db_user = std::getenv("DB_USER");
-        const char* db_pass = std::getenv("DB_PASS");
+  httplib::Server svr;
+  PgPool pool(CONN_STR);
 
-        const char* redis_host = std::getenv("REDIS_HOST");
-        const char* redis_port = std::getenv("REDIS_PORT");
+  // Добавление записи
+  svr.Post(R"(/api/([A-Za-z_]+))",
+           [&](const httplib::Request &req, httplib::Response &res) {
+             try {
+               std::string table = req.matches[1];
+               if (!is_valid_table(table)) {
+                 res.status = 404;
+                 res.set_content("Table not found", "text/plain");
+                 return;
+               }
+               auto data = json::parse(req.body);
 
-        // PostgreSQL соединение
-        std::string conn_str = "host=" + std::string(db_host) +
-                               " port=" + std::string(db_port) +
-                               " dbname=" + std::string(db_name) +
-                               " user=" + std::string(db_user) +
-                               " password=" + std::string(db_pass);
-        pqxx::connection pg_conn(conn_str);
+               std::vector<std::string> cols;
+               std::vector<std::string> params;
+               for (auto it = data.begin(); it != data.end(); ++it) {
+                 cols.push_back(it.key());
+                 if (it.value().is_null())
+                   params.push_back("__NULL__");
+                 else if (it.value().is_string())
+                   params.push_back(it.value().get<std::string>());
+                 else
+                   params.push_back(it.value().dump());
+               }
+               if (cols.empty()) {
+                 res.status = 400;
+                 res.set_content("No fields provided", "text/plain");
+                 return;
+               }
 
-        // Redis соединение
-        auto redis = Redis("tcp://" + std::string(redis_host) + ":" + std::string(redis_port));
+               std::string placeholders;
+               std::string collist;
+               for (size_t i = 0; i < cols.size(); ++i) {
+                 if (i) {
+                   placeholders += ",";
+                   collist += ",";
+                 }
+                 placeholders += "$" + std::to_string(i + 1);
+                 collist += cols[i];
+               }
 
-        httplib::Server svr;
+               auto pconn = pool.acquire();
+               pqxx::work txn(*pconn.conn);
 
-        // POST /api/posts - создаем пост
-        svr.Post("/api/posts", [&](const httplib::Request& req, httplib::Response& res){
+               std::string values;
+               for (size_t i = 0; i < params.size(); ++i) {
+                 if (i)
+                   values += ", ";
+                 if (params[i] == "__NULL__")
+                   values += "NULL";
+                 else
+                   values += txn.quote(params[i]);
+               }
+
+               std::string sql_query = "INSERT INTO " + table + " (" + collist +
+                                       ") VALUES (" + values + ")";
+               txn.exec(sql_query);
+               txn.commit();
+
+               res.set_content("Item added\n", "text/plain");
+             } catch (const std::exception &e) {
+               res.status = 500;
+               res.set_content(std::string("Error: ") + e.what(), "text/plain");
+             }
+           });
+
+  // Получение всех записей
+  svr.Get(R"(/api/([A-Za-z_]+))",
+          [&](const httplib::Request &req, httplib::Response &res) {
             try {
-                auto j = nlohmann::json::parse(req.body);
-                std::string title = j.value("title", "");
-                int author_id = j.value("author_id", 0);
-                int channel_id = j.value("channel_id", 0);
+              std::string table = req.matches[1];
+              if (!is_valid_table(table)) {
+                res.status = 404;
+                res.set_content("Table not found", "text/plain");
+                return;
+              }
+              auto pconn = pool.acquire();
+              pqxx::work txn(*pconn.conn);
 
-                pqxx::work txn(pg_conn);
-                txn.exec_params(
-                    "INSERT INTO posts (title, author_id, channel_id) VALUES ($1, $2, $3) RETURNING post_id",
-                    title,
-                    author_id == 0 ? pqxx::null{} : author_id,
-                    channel_id == 0 ? pqxx::null{} : channel_id
-                );
-                auto result = txn.exec("SELECT currval(pg_get_serial_sequence('posts','post_id'))");
-                int post_id = result[0][0].as<int>();
-                txn.commit();
+              std::string sql_query = "SELECT * FROM " + table;
 
-                // Кэширование в Redis
-                redis.set("post:" + std::to_string(post_id), title);
+              pqxx::result r = txn.exec(sql_query);
 
-                res.set_content("{\"status\":\"created\",\"post_id\":" + std::to_string(post_id) + "}", "application/json");
-            } catch (const std::exception& e) {
-                res.status = 500;
-                res.set_content("{\"error\":\"" + std::string(e.what()) + "\"}", "application/json");
+              json arr = json::array();
+
+              for (const auto &row : r) {
+                json obj;
+                for (const auto &field : row) {
+                  if (field.is_null())
+                    obj[field.name()] = nullptr;
+                  else
+                    obj[field.name()] = field.c_str();
+                }
+                arr.push_back(obj);
+              }
+
+              res.set_content(arr.dump(2), "application/json");
+            } catch (const std::exception &e) {
+              res.status = 500;
+              res.set_content(std::string("Error: ") + e.what(), "text/plain");
             }
-        });
+          });
 
-        // GET /api/posts/:id - получаем пост
-        svr.Get(R"(/api/posts/(\d+))", [&](const httplib::Request& req, httplib::Response& res){
+  // Получение одной записи
+  svr.Get(R"(/api/([A-Za-z_]+)/([0-9]+)(?:/([0-9]+))?)",
+          [&](const httplib::Request &req, httplib::Response &res) {
             try {
-                int post_id = std::stoi(req.matches[1]);
+              std::string table = req.matches[1];
+              if (!is_valid_table(table)) {
+                res.status = 404;
+                res.set_content("Table not found", "text/plain");
+                return;
+              }
 
-                // Сначала проверяем в Redis
-                auto val = redis.get("post:" + std::to_string(post_id));
-                if (val) {
-                    res.set_content("{\"post_id\":" + std::to_string(post_id) + ",\"title\":\"" + *val + "\"}", "application/json");
-                    return;
+              if (table == "post_tags") {
+                if (!req.matches[2].matched || !req.matches[3].matched) {
+                  res.status = 400;
+                  res.set_content("Need post_id and tag_id in path",
+                                  "text/plain");
+                  return;
                 }
+                std::string post_id = req.matches[2].str();
+                std::string tag_id = req.matches[3].str();
+                try {
 
-                // Иначе из PostgreSQL
-                pqxx::work txn(pg_conn);
-                auto result = txn.exec_params("SELECT title FROM posts WHERE post_id=$1", post_id);
-                if (result.size() == 0) {
-                    res.status = 404;
-                    res.set_content("{\"error\":\"Post not found\"}", "application/json");
-                    return;
+                  auto pconn = pool.acquire();
+                  pqxx::work txn(*pconn.conn);
+                  std::string sql_query = "SELECT * FROM " + table +
+                                          " WHERE post_id=$1 AND tag_id=$2";
+                  pqxx::result r = txn.exec_params(sql_query, post_id, tag_id);
+
+                  json arr = json::array();
+
+                  for (const auto &row : r) {
+                    json obj;
+                    for (const auto &field : row) {
+                      if (field.is_null())
+                        obj[field.name()] = nullptr;
+                      else
+                        obj[field.name()] = field.c_str();
+                    }
+                    arr.push_back(obj);
+                  }
+
+                  res.set_content(arr.dump(2), "application/json");
+                } catch (const std::exception &e) {
+                  res.status = 500;
+                  res.set_content(e.what(), "text/plain");
                 }
-                std::string title = result[0][0].as<std::string>();
-                // Кэшируем
-                redis.set("post:" + std::to_string(post_id), title);
+                return;
+              }
 
-                res.set_content("{\"post_id\":" + std::to_string(post_id) + ",\"title\":\"" + title + "\"}", "application/json");
-            } catch (const std::exception& e) {
-                res.status = 500;
-                res.set_content("{\"error\":\"" + std::string(e.what()) + "\"}", "application/json");
+              std::string id = req.matches[2].str();
+
+              auto it = pk_map.find(table);
+              if (it == pk_map.end()) {
+                res.status = 400;
+                res.set_content("Table has no simple PK", "text/plain");
+                return;
+              }
+              std::string pk = it->second;
+
+              auto pconn = pool.acquire();
+              pqxx::work txn(*pconn.conn);
+
+              std::string sql_query =
+                  "SELECT * FROM " + table + " WHERE " + pk + " = $1";
+              pqxx::result r = txn.exec_params(sql_query, id);
+
+              json arr = json::array();
+
+              for (const auto &row : r) {
+                json obj;
+                for (const auto &field : row) {
+                  if (field.is_null())
+                    obj[field.name()] = nullptr;
+                  else
+                    obj[field.name()] = field.c_str();
+                }
+                arr.push_back(obj);
+              }
+
+              res.set_content(arr.dump(2), "application/json");
+            } catch (const std::exception &e) {
+              res.status = 500;
+              res.set_content(std::string("Error: ") + e.what(), "text/plain");
             }
-        });
+          });
 
-        std::cout << "Server running at 0.0.0.0:8080\n";
-        svr.listen("0.0.0.0", 8080);
+  // Обновление записи
+  svr.Put(R"(/api/([A-Za-z_]+)/([0-9]+)(?:/([0-9]+))?)",
+          [&](const httplib::Request &req, httplib::Response &res) {
+            try {
+              std::string table = req.matches[1];
+              if (!is_valid_table(table)) {
+                res.status = 404;
+                res.set_content("Table not found", "text/plain");
+                return;
+              }
+              std::string id = req.matches[2].str();
 
-    } catch (const std::exception &e) {
-        std::cerr << "Fatal: " << e.what() << "\n";
-        return 1;
-    }
+              auto it = pk_map.find(table);
+              if (it == pk_map.end()) {
+                res.status = 400;
+                res.set_content("Table has no simple PK", "text/plain");
+                return;
+              }
+              std::string pk = it->second;
+
+              auto data = json::parse(req.body);
+
+              std::vector<std::string> cols;
+              std::vector<std::string> params;
+              for (auto it = data.begin(); it != data.end(); ++it) {
+                cols.push_back(it.key());
+                if (it.value().is_null())
+                  params.push_back("__NULL__");
+                else if (it.value().is_string())
+                  params.push_back(it.value().get<std::string>());
+                else
+                  params.push_back(it.value().dump());
+              }
+
+              if (cols.empty()) {
+                res.status = 400;
+                res.set_content("No fields provided", "text/plain");
+                return;
+              }
+
+              auto pconn = pool.acquire();
+              pqxx::work txn(*pconn.conn);
+
+              std::string set_clause;
+              for (size_t i = 0; i < cols.size(); ++i) {
+                if (i)
+                  set_clause += ", ";
+                set_clause += cols[i] + " = ";
+                if (params[i] == "__NULL__")
+                  set_clause += "NULL";
+                else
+                  set_clause += txn.quote(params[i]);
+              }
+
+              std::string sql_query = "UPDATE " + table + " SET " + set_clause +
+                                      " WHERE " + pk + " = " + txn.quote(id);
+
+              txn.exec(sql_query);
+              txn.commit();
+
+              res.set_content("Item updated\n", "text/plain");
+            } catch (const std::exception &e) {
+              res.status = 500;
+              res.set_content(std::string("Error: ") + e.what(), "text/plain");
+            }
+          });
+
+  // Удаление записи
+  svr.Delete(
+      R"(/api/([A-Za-z_]+)/([0-9]+)(?:/([0-9]+))?)",
+      [&](const httplib::Request &req, httplib::Response &res) {
+        try {
+          std::string table = req.matches[1];
+          if (!is_valid_table(table)) {
+            res.status = 404;
+            res.set_content("Table not found", "text/plain");
+            return;
+          }
+
+          if (table == "post_tags") {
+            if (!req.matches[2].matched || !req.matches[3].matched) {
+              res.status = 400;
+              res.set_content("Need post_id and tag_id in path", "text/plain");
+              return;
+            }
+            std::string post_id = req.matches[2].str();
+            std::string tag_id = req.matches[3].str();
+            try {
+
+              auto pconn = pool.acquire();
+              pqxx::work txn(*pconn.conn);
+              std::string sql_query =
+                  "DELETE FROM " + table + " WHERE post_id=$1 AND tag_id=$2";
+              txn.exec_params(sql_query, post_id, tag_id);
+              txn.commit();
+
+              res.set_content("Item deleted\n", "text/plain");
+            } catch (const std::exception &e) {
+              res.status = 500;
+              res.set_content(e.what(), "text/plain");
+            }
+            return;
+          }
+
+          std::string id = req.matches[2].str();
+
+          auto it = pk_map.find(table);
+          if (it == pk_map.end()) {
+            res.status = 400;
+            res.set_content("Table has no simple PK", "text/plain");
+            return;
+          }
+          std::string pk = it->second;
+
+          auto pconn = pool.acquire();
+          pqxx::work txn(*pconn.conn);
+
+          std::string sql_query =
+              "DELETE FROM " + table + " WHERE " + pk + " = " + txn.quote(id);
+
+          txn.exec(sql_query);
+          txn.commit();
+
+          res.set_content("Item deleted\n", "text/plain");
+        } catch (const std::exception &e) {
+          res.status = 500;
+          res.set_content(std::string("Error: ") + e.what(), "text/plain");
+        }
+      });
+
+  svr.listen("0.0.0.0", 8080);
 }
