@@ -1,9 +1,12 @@
+-- init.sql для PostgreSQL + TimescaleDB
+CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;
+
 -- Пользователи агрегатора
 CREATE TABLE IF NOT EXISTS users (
     user_id SERIAL PRIMARY KEY,
-    username VARCHAR(255) UNIQUE,            -- имя пользователя (добавлено)
-    access_level VARCHAR(20) NOT NULL,       -- уровень доступа: admin, user, etc.
-    created_at TIMESTAMP DEFAULT NOW()       -- дата регистрации
+    username VARCHAR(255) UNIQUE,
+    access_level VARCHAR(20) NOT NULL,
+    created_at TIMESTAMP DEFAULT NOW()
 );
 
 -- Авторы постов
@@ -24,7 +27,7 @@ CREATE TABLE IF NOT EXISTS sources (
     source_id SERIAL PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
     address VARCHAR(255) NOT NULL,
-    topic VARCHAR(255)                      -- можно указать общую тематику
+    topic VARCHAR(255)
 );
 
 -- Сообщества / каналы
@@ -49,14 +52,12 @@ CREATE TABLE IF NOT EXISTS posts (
     created_at TIMESTAMP DEFAULT NOW()
 );
 
-SELECT create_hypertable('posts', 'created_at', if_not_exists => TRUE);
-
 -- Медиа (фото, видео и т.п.)
 CREATE TABLE IF NOT EXISTS media (
     media_id SERIAL PRIMARY KEY,
     post_id INT REFERENCES posts(post_id) ON DELETE CASCADE,
     media_content VARCHAR(255),
-    media_type VARCHAR(50) DEFAULT 'image'   -- тип: image, video, gif и т.п.
+    media_type VARCHAR(50) DEFAULT 'image'
 );
 
 -- Теги
@@ -65,7 +66,7 @@ CREATE TABLE IF NOT EXISTS tags (
     name VARCHAR(100) NOT NULL UNIQUE
 );
 
--- Связка постов и тегов (многие-ко-многим)
+-- Связка постов и тегов
 CREATE TABLE IF NOT EXISTS post_tags (
     post_id INT REFERENCES posts(post_id) ON DELETE CASCADE,
     tag_id INT REFERENCES tags(tag_id) ON DELETE CASCADE,
