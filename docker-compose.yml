@@ -1,11 +1,8 @@
 version: "3.9"
 
 services:
-  # PostgreSQL с TimescaleDB
   db:
     image: timescale/timescaledb:2.14.2-pg15
-    container_name: news_postgres
-    restart: always
     environment:
       POSTGRES_USER: news_user
       POSTGRES_PASSWORD: news_pass
@@ -15,48 +12,23 @@ services:
     volumes:
       - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U news_user"]
+      test: ["CMD-SHELL", "pg_isready -U news_user -d news_db"]
       interval: 10s
       timeout: 5s
       retries: 5
 
-  # Redis для кэша и счётчиков
   redis:
     image: redis:7
-    container_name: news_redis
-    restart: always
     ports:
       - "6379:6379"
     volumes:
       - redis_data:/data
-    command: ["redis-server", "--save", "60", "1", "--loglevel", "warning"]
 
-  # Cassandra для исторических данных
-  cassandra:
-    image: cassandra:5
-    container_name: news_cassandra
-    restart: always
-    ports:
-      - "9042:9042"
-    environment:
-      - CASSANDRA_CLUSTER_NAME=NewsCluster
-      - CASSANDRA_NUM_TOKENS=256
-      - CASSANDRA_DC=dc1
-    volumes:
-      - cassandra_data:/var/lib/cassandra
-
-  # Твой сервер
   cpp_server:
     build: ./server
-    container_name: news_cpp_server
-    restart: on-failure
     depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_started
-      cassandra:
-        condition: service_started
+      - db
+      - redis
     ports:
       - "8080:8080"
     environment:
@@ -67,11 +39,8 @@ services:
       DB_PASS: news_pass
       REDIS_HOST: redis
       REDIS_PORT: "6379"
-      CASSANDRA_HOST: cassandra
-      CASSANDRA_PORT: "9042"
     volumes:
       - ./server:/app
 
 volumes:
   redis_data:
-  cassandra_data:
