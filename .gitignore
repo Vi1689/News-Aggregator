@@ -1,1 +1,9 @@
 main
+
+!/**/
+!*.*
+!Makefile
+!Dockerfile
+!.gitignore
+*.[oad]
+
