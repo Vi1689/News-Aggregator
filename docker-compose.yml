@@ -1,8 +1,6 @@
-version: "3.9"
-
 services:
   db:
-    image: timescale/timescaledb:2.14.2-pg15
+    image: postgres:15
     environment:
       POSTGRES_USER: news_user
       POSTGRES_PASSWORD: news_pass
@@ -11,9 +9,10 @@ services:
       - "5432:5432"
     volumes:
       - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - ./db/tmp.sql:/docker-entrypoint-initdb.d/tmp.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U news_user -d news_db"]
-      interval: 10s
+      test: ["CMD-SHELL", "pg_isready -U news_user"]
+      interval: 5s
       timeout: 5s
       retries: 5
 
@@ -21,26 +20,13 @@ services:
     image: redis:7
     ports:
       - "6379:6379"
-    volumes:
-      - redis_data:/data
 
-  cpp_server:
-    build: ./server
+  server:
+    build:
+      context: .
+      dockerfile: ./server/Dockerfile
     depends_on:
-      - db
-      - redis
+      db:
+        condition: service_healthy
     ports:
       - "8080:8080"
-    environment:
-      DB_HOST: db
-      DB_PORT: "5432"
-      DB_NAME: news_db
-      DB_USER: news_user
-      DB_PASS: news_pass
-      REDIS_HOST: redis
-      REDIS_PORT: "6379"
-    volumes:
-      - ./server:/app
-
-volumes:
-  redis_data:

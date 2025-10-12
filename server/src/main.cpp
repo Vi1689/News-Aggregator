@@ -1,11 +1,13 @@
-// #include "httplib.h"
-#include "/media/vitalii/medio/study/News-Aggregator/cpp-httplib/httplib.h"
+#include "httplib.h"
+// #include "/media/vitalii/medio/study/News-Aggregator/cpp-httplib/httplib.h"
 #include <nlohmann/json.hpp>
 #include <pqxx/pqxx>
 #include <queue>
 #include <string>
+#include <sw/redis++/redis++.h>
 
 using json = nlohmann::json;
+using namespace sw::redis;
 
 class PgPool {
 public:
@@ -64,9 +66,34 @@ const std::unordered_map<std::string, std::string> pk_map = {
     {"media", "media_id"},      {"tags", "tag_id"},
     {"comments", "comment_id"}};
 
-const std::vector<std::string> valid_tables = {
-    "users", "authors", "news_texts", "sources",   "channels",
-    "posts", "media",   "tags",       "post_tags", "comments"};
+const std::vector<std::string> valid_tables = {"users",
+                                               "authors",
+                                               "news_texts",
+                                               "sources",
+                                               "channels",
+                                               "posts",
+                                               "media",
+                                               "tags",
+                                               "post_tags",
+                                               "comments",
+                                               "top_authors",
+                                               "active_users",
+                                               "popular_tags",
+                                               "posts_by_channel",
+                                               "avg_comments_per_post",
+                                               "posts_ranked",
+                                               "comments_moving_avg",
+                                               "cumulative_posts",
+                                               "tag_rank",
+                                               "user_activity_rank",
+                                               "posts_with_authors",
+                                               "comments_with_users",
+                                               "posts_with_tags",
+                                               "posts_authors_channels",
+                                               "comments_posts_users",
+                                               "posts_authors_tags",
+                                               "full_post_info",
+                                               "full_post_media"};
 
 bool is_valid_table(const std::string &t) {
   for (const auto &x : valid_tables)
@@ -78,6 +105,7 @@ bool is_valid_table(const std::string &t) {
 int main() {
   httplib::Server svr;
   PgPool pool(CONN_STR);
+  Redis redis("tcp://redis:6379");
 
   // Добавление записи
   svr.Post(R"(/api/([A-Za-z_]+))",
@@ -137,6 +165,8 @@ int main() {
                txn.exec(sql_query);
                txn.commit();
 
+               redis.del("cache:" + table);
+
                res.set_content("Item added\n", "text/plain");
              } catch (const std::exception &e) {
                res.status = 500;
@@ -154,6 +184,14 @@ int main() {
                 res.set_content("Table not found", "text/plain");
                 return;
               }
+
+              auto cache_key = "cache:" + table;
+              auto cached = redis.get(cache_key);
+              if (cached) {
+                res.set_content(*cached, "application/json");
+                return;
+              }
+
               auto pconn = pool.acquire();
               pqxx::work txn(*pconn.conn);
 
@@ -175,6 +213,9 @@ int main() {
               }
 
               res.set_content(arr.dump(2), "application/json");
+
+              // 🔹 Сохранить результат в кэш Redis
+              redis.set("cache:" + table, arr.dump(2));
             } catch (const std::exception &e) {
               res.status = 500;
               res.set_content(std::string("Error: ") + e.what(), "text/plain");
@@ -203,6 +244,14 @@ int main() {
                 std::string tag_id = req.matches[3].str();
                 try {
 
+                  std::string cache_key =
+                      "cache:post_tags:" + post_id + ":" + tag_id;
+                  auto cached = redis.get(cache_key);
+                  if (cached) {
+                    res.set_content(*cached, "application/json");
+                    return;
+                  }
+
                   auto pconn = pool.acquire();
                   pqxx::work txn(*pconn.conn);
                   std::string sql_query = "SELECT * FROM " + table +
@@ -223,6 +272,9 @@ int main() {
                   }
 
                   res.set_content(arr.dump(2), "application/json");
+
+                  // 💾 Сохраняем в кэш
+                  redis.set(cache_key, arr.dump(2));
                 } catch (const std::exception &e) {
                   res.status = 500;
                   res.set_content(e.what(), "text/plain");
@@ -231,6 +283,13 @@ int main() {
               }
 
               std::string id = req.matches[2].str();
+
+              std::string cache_key = "cache:" + table + ":" + id;
+              auto cached = redis.get(cache_key);
+              if (cached) {
+                res.set_content(*cached, "application/json");
+                return;
+              }
 
               auto it = pk_map.find(table);
               if (it == pk_map.end()) {
@@ -261,6 +320,9 @@ int main() {
               }
 
               res.set_content(arr.dump(2), "application/json");
+
+              // 🔹 Сохранить результат в кэш Redis
+              redis.set("cache:" + table + ":" + id, arr.dump(2));
             } catch (const std::exception &e) {
               res.status = 500;
               res.set_content(std::string("Error: ") + e.what(), "text/plain");
@@ -327,6 +389,8 @@ int main() {
               txn.exec(sql_query);
               txn.commit();
 
+              redis.del("cache:" + table);
+              redis.del("cache:" + table + ":" + id);
               res.set_content("Item updated\n", "text/plain");
             } catch (const std::exception &e) {
               res.status = 500;
@@ -364,6 +428,9 @@ int main() {
               txn.commit();
 
               res.set_content("Item deleted\n", "text/plain");
+
+              redis.del("cache:post_tags:" + post_id + ":" + tag_id);
+              redis.del("cache:posts:" + post_id);
             } catch (const std::exception &e) {
               res.status = 500;
               res.set_content(e.what(), "text/plain");
@@ -389,6 +456,9 @@ int main() {
 
           txn.exec(sql_query);
           txn.commit();
+
+          redis.del("cache:" + table);
+          redis.del("cache:" + table + ":" + id);
 
           res.set_content("Item deleted\n", "text/plain");
         } catch (const std::exception &e) {

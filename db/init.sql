@@ -1,5 +1,4 @@
--- init.sql для PostgreSQL + TimescaleDB
-CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;
+-- init.sql для PostgreSQL 
 
 -- Пользователи агрегатора
 CREATE TABLE IF NOT EXISTS users (
