@@ -1,0 +1,21 @@
+docker compose down -v --remove-orphans
+
+docker compose build --no-cache
+
+docker compose up -d
+
+# Для всех
+curl http://localhost:8080/api/sources
+
+curl http://localhost:8080/api/sources/5
+
+curl -X POST http://localhost:8080/api/sources -H "Content-Type: application/json" -d '{"name":"Test item", "address":"124.125"}'
+
+curl -X PUT http://localhost:8080/api/sources/5 -H "Content-Type: application/json" -d '{"name":"Updated Name", "address":"Dada da"}'
+
+curl -X DELETE http://localhost:8080/api/sources/5
+
+# Для post_tags
+curl http://localhost:8080/api/post_tags/1/3
+
+curl -X DELETE http://localhost:8080/api/post_tags/1/3

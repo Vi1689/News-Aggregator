@@ -1,24 +1,37 @@
-FROM gcc:13
+FROM gcc:14
 
-WORKDIR /app
-
+# Устанавливаем зависимости
 RUN apt-get update && apt-get install -y \
     cmake \
-    build-essential \
-    libpq-dev \
+    make \
+    git \
     libpqxx-dev \
-    wget \
+    libpq-dev \
+    nlohmann-json3-dev \
+    curl \
+    libhiredis-dev \
+    libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# header-only libs
-RUN mkdir -p include
-RUN wget -q -O include/httplib.h https://raw.githubusercontent.com/yhirose/cpp-httplib/master/httplib.h
-RUN wget -q -O include/json.hpp https://raw.githubusercontent.com/nlohmann/json/develop/single_include/nlohmann/json.hpp
+# Сборка и установка Redis++
+RUN git clone https://github.com/sewenew/redis-plus-plus.git /tmp/redis-plus-plus && \
+    cd /tmp/redis-plus-plus && mkdir build && cd build && \
+    cmake -DREDIS_PLUS_PLUS_BUILD_TEST=OFF .. && \
+    make -j$(nproc) && make install && \
+    ldconfig && \              
+    rm -rf /tmp/redis-plus-plus
 
-COPY . .
+# Рабочий каталог
+WORKDIR /app
 
-RUN mkdir -p build && cd build && cmake .. && make -j$(nproc)
+# Копируем исходники
+COPY ./cpp-httplib ./cpp-httplib
+COPY ./server/Makefile .
+COPY ./server/src ./src
+
+# Сборка проекта
+RUN make
 
 EXPOSE 8080
 
-CMD ["./build/server"]
+CMD ["./server"]

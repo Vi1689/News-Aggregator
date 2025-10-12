@@ -1,8 +1,6 @@
 services:
   db:
     image: postgres:15
-    container_name: news_postgres
-    restart: always
     environment:
       POSTGRES_USER: news_user
       POSTGRES_PASSWORD: news_pass
@@ -11,29 +9,24 @@ services:
       - "5432:5432"
     volumes:
       - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - ./db/tmp.sql:/docker-entrypoint-initdb.d/tmp.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U news_user"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
-  cpp_server:
-    build: ./server
-    container_name: news_cpp_server
-    restart: on-failure
-    depends_on:
-      - db
+  redis:
+    image: redis:7
     ports:
-      - "8080:8080"
-    environment:
-      DB_HOST: db
-      DB_PORT: "5432"
-      DB_NAME: news_db
-      DB_USER: news_user
-      DB_PASS: news_pass
-  data_generator:
+      - "6379:6379"
+
+  server:
     build:
       context: .
-      dockerfile: Dockerfile.data
+      dockerfile: ./server/Dockerfile
     depends_on:
-      - db
-    environment:
-      - PYTHONUNBUFFERED=1
-
-volumes:
-  db_data:
+      db:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
