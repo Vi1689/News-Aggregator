@@ -1,3 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<!--Этот файл содержит конфигурацию для researchers. Этот файл обновляет сервер.-->
+
 <config>
     <source name="Reddit"> 
         <channel_limit> 20 </channel_limit> 
@@ -9,12 +13,11 @@
     </source>
 
     <source name="Vkontakte"> 
-        <channel_limit> 1 </channel_limit> 
+        <channel_limit> 20 </channel_limit> 
         <post_limit> 1000 </post_limit> 
         <comment_limit> 10000 </comment_limit>
         <media_limit> 5000 </media_limit>
-        <preferred_channels>Мир Танков</preferred_channels>
-        <research_period> 1 </research_period>
+        <preferred_channels></preferred_channels>
+        <research_period> 5 </research_period>
     </source>
 </config>
-
