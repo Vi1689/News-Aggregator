@@ -73,5 +73,4 @@ services:
     volumes:
       - ./config/researchers.xml:/usr/local/etc/vk-researcher/test_conf.xml
       - ./researchers/vk/access_token:/usr/local/etc/vk-researcher/access_token
-    ports:
-      - "8080:8080"
+      
