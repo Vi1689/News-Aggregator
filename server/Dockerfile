@@ -25,7 +25,7 @@ RUN git clone https://github.com/sewenew/redis-plus-plus.git /tmp/redis-plus-plu
 WORKDIR /app
 
 # Копируем исходники
-COPY ./cpp-httplib ./cpp-httplib
+RUN git clone https://github.com/yhirose/cpp-httplib.git
 COPY ./server/Makefile .
 COPY ./server/src ./src
 
