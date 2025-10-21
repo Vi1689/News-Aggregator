@@ -62,6 +62,7 @@ func main() {
 			fmt.Printf("%d. %s (ID: %d, Участников: %d)\n", i+1, group.Name, group.ID, group.MembersCount)
 			// получить post_limit постов
 			postsSlice, _ := vk.GetGroupPosts(string(accessToken), group.ID, conf.Post_limit)
+
 			// TODO: отправить запросы на из добавление на сервер
 			for j, post := range postsSlice {
 				fmt.Printf("%d. %s [%d] %d\n", j+1, post.Text, post.Comments, post.Likes)
