@@ -41,20 +41,11 @@ func ParseConfigFile(data string) (ResearcherConfig, error) {
 		return retConf, err
 	}
 
-	fmt.Printf("--- Unmarshal ---\n\n")
 	for _, param := range config.Source {
 
-		fmt.Printf("name: %s\n", param.Name)
 		if param.Name != "Vkontakte" {
 			continue
 		}
-		fmt.Printf("channel_limit: %s\n", param.ChannelLimit)
-		fmt.Printf("post_limit: %s\n", param.PostLimit)
-		fmt.Printf("comment_limit: %s\n", param.CommentLimit)
-		fmt.Printf("media_limit: %s\n", param.MediaLimit)
-		fmt.Printf("preferred_channels: %s\n", param.PreferredChannels)
-		fmt.Printf("research_period: %s\n", param.ResearchPeriod)
-		fmt.Printf("---\n")
 		var err error
 		retConf.Channel_limit, err = strconv.Atoi(strings.TrimSpace(strings.TrimSpace(param.ChannelLimit)))
 		if err != nil {
@@ -81,7 +72,7 @@ func ParseConfigFile(data string) (ResearcherConfig, error) {
 }
 
 func ValidateConfig(conf ResearcherConfig) error {
-	fmt.Printf("--- ValidateConfig ---\n\n")
+	fmt.Printf("--- ValidateConfig ---\n")
 	fmt.Printf("channel_limit: %d\n", conf.Channel_limit)
 	fmt.Printf("post_limit: %d\n", conf.Post_limit)
 	fmt.Printf("comment_limit: %d\n", conf.Comment_limit)

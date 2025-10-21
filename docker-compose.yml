@@ -65,6 +65,13 @@ services:
     ports:
       - "8080:8080"
 
-volumes:
-  postgres_master_data:
-  postgres_replica_data:
+  researcher-vk:
+    build:
+      context: .
+      dockerfile: ./researchers/vk/Dockerfile
+
+    volumes:
+      - ./config/researchers.xml:/usr/local/etc/vk-researcher/test_conf.xml
+      - ./researchers/vk/access_token:/usr/local/etc/vk-researcher/access_token
+    ports:
+      - "8080:8080"
