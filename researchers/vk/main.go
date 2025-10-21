@@ -7,6 +7,8 @@ import (
 
 	"researcher-vk/internal/config"
 	"researcher-vk/internal/vk"
+	"researcher-vk/internal/vkToken"
+	_ "researcher-vk/internal/vkToken"
 )
 
 func MakeGroupsSlice(accessToken string, conf config.ResearcherConfig) ([]vk.VKGroup, error) {
@@ -18,16 +20,23 @@ func MakeGroupsSlice(accessToken string, conf config.ResearcherConfig) ([]vk.VKG
 
 func main() {
 
-	accessTokenFileName := "access_token"
-	accessToken, err := os.ReadFile(accessTokenFileName)
-	if err != nil {
-		fmt.Println(err)
-		os.Exit(1)
-	}
+	// автоматизация получения токена vk
+	go func() {
+		vkToken.GetValidToken()
+	}()
 
 	for {
-		fmt.Printf("New Scan")
+		fmt.Printf("New Scan\n")
+		accessToken := vkToken.GetAccessToken()
+		if len(accessToken) == 0 {
+			fmt.Printf("Открой браузер и перейди по ссылке: %s\n", vkToken.GetAuthUrl())
+			fmt.Println("После авторизации скопируй code из URL и вставь сюда:")
+			timer1 := time.NewTimer(time.Duration(10) * time.Second)
+			<-timer1.C
+			continue
+		}
 		//ConfigFileName := "../../config/researchers.xml"
+		//ConfigFileName := "/usr/local/etc/vk-researcher/test_conf.xml"
 		ConfigFileName := "test_conf.xml"
 
 		xmlData, err := os.ReadFile(ConfigFileName)
