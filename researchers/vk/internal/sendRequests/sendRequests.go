@@ -247,6 +247,8 @@ func postRequest(endpoint string, data map[string]interface{}) (int, error) {
 		return 0, err
 	}
 
+	fmt.Printf("\n\njsonData = %s\n\n", jsonData)
+
 	resp, err := http.Post(baseURL+endpoint, "application/json", bytes.NewBuffer(jsonData))
 	if err != nil {
 		return 0, err
