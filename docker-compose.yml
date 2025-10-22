@@ -11,7 +11,7 @@ services:
       - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
       - ./db/tmp.sql:/docker-entrypoint-initdb.d/tmp.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U news_user"]
+      test: ["CMD-SHELL", "pg_isready -U news_user -d news_db"]
       interval: 5s
       timeout: 5s
       retries: 5
