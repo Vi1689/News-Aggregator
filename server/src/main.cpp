@@ -159,19 +159,43 @@ int main() {
                  else
                    values += txn.quote(params[i]);
                }
+             std::string sql_query = "INSERT INTO " + table + " (" + collist +
+                                     ") VALUES (" + placeholders + ") RETURNING *";
 
-               std::string sql_query = "INSERT INTO " + table + " (" + collist +
-                                       ") VALUES (" + values + ")";
-               txn.exec(sql_query);
-               txn.commit();
-
-               redis.del("cache:" + table);
-
-               res.set_content("Item added\n", "text/plain");
-             } catch (const std::exception &e) {
-               res.status = 500;
-               res.set_content(std::string("Error: ") + e.what(), "text/plain");
+             pqxx::params p;
+             for (const auto& param : params) {
+               if (param == "__NULL__") {
+                 p.append(std::monostate{});
+               } else {
+                 p.append(param);
+               }
              }
+
+             pqxx::result r = txn.exec(sql_query, p); // получеие ответа от бд
+             txn.commit();
+
+             if (r.empty()) {
+               res.status = 500;
+               res.set_content("Failed to retrieve inserted item", "text/plain");
+               return;
+             }
+
+             json obj; // формируем json
+             const auto &row = r[0];
+             for (const auto &field : row) {
+               if (field.is_null())
+                 obj[field.name()] = nullptr;
+               else
+                 obj[field.name()] = field.c_str();
+             }
+
+             redis.del("cache:" + table);
+
+             res.set_content(obj.dump(2), "application/json");
+           } catch (const std::exception &e) {
+             res.status = 500;
+             res.set_content(std::string("Error: ") + e.what(), "text/plain");
+           }
            });
 
   // Получение всех записей
