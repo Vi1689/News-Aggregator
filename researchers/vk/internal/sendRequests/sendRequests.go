@@ -13,9 +13,9 @@ import (
 )
 
 // Базовый URL сервера (из примеров curl)
-const baseURL = "http://localhost:8080/api"
+//const baseURL = "http://localhost:8080/api"
 
-//const baseURL = "http://server:8080/api"
+const baseURL = "http://server:8080/api"
 
 // Структура для ответа сервера (предполагаем, что сервер возвращает JSON с id или успехом)
 type APIResponse struct {
@@ -32,55 +32,7 @@ func AddVKSource() (int, error) {
 		"address": "vk.com",
 		"topic":   "social",
 	}
-
-	return postRequest("/sources", data)
-}
-
-// getSourceID отправляет GET-запрос на /api/sources, ищет source по имени и возвращает source_id как int
-func GetSourceID() (int, error) {
-
-	type Source struct {
-		Address  string `json:"address"`
-		Name     string `json:"name"`
-		SourceID string `json:"source_id"` // API возвращает как строку
-		Topic    string `json:"topic"`
-	}
-
-	// Формируем URL
-	url := baseURL + "/sources"
-
-	// Отправляем GET-запрос
-	resp, err := http.Get(url)
-	if err != nil {
-		return 0, fmt.Errorf("failed to send GET request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	// Проверяем статус-код
-	if resp.StatusCode != http.StatusOK {
-		return 0, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
-	}
-
-	// Декодируем JSON-ответ в срез структур
-	var sources []Source
-	if err := json.NewDecoder(resp.Body).Decode(&sources); err != nil {
-		return 0, fmt.Errorf("failed to decode JSON response: %w", err)
-	}
-
-	// Ищем source по имени
-	for _, source := range sources {
-		if source.Name == "VK" {
-			// Конвертируем source_id из строки в int (поскольку foreign key в БД, вероятно, int)
-			sourceID, err := strconv.Atoi(source.SourceID)
-			if err != nil {
-				return 0, fmt.Errorf("failed to convert source_id to int: %w", err)
-			}
-			return sourceID, nil
-		}
-	}
-
-	// Если source не найден
-	return 0, fmt.Errorf("source with name VK not found")
+	return postRequest("/sources", data, "source_id")
 }
 
 // Функция для добавления группы VK (channels)
@@ -93,14 +45,13 @@ func AddVKChannel(group vk.VKGroup, sourceID int) (int, error) {
 		"source_id":         sourceID,
 		"topic":             "general", // Или извлечь из группы, если есть
 	}
-	return postRequest("/channels", data)
+	return postRequest("/channels", data, "channel_id")
 }
 
 // Функция для добавления поста VK (posts)
 // channelID - ID канала (группы), authorID - ID автора (если from_id > 0, иначе nil)
 // Извлекает теги из текста (#tag) и добавляет их
 func AddVKPost(post vk.VKPost, channelID int, authorID *int) (int, error) {
-	fmt.Printf("AddVKPost\n")
 	// Извлечь теги из текста
 	tags := extractTags(post.Text)
 
@@ -137,11 +88,10 @@ func AddVKPost(post vk.VKPost, channelID int, authorID *int) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("failed to add text: %v", err)
 	}
-	fmt.Printf("======================== textID = %d\n", textID)
 	data["text_id"] = textID
 
 	// Добавить пост
-	postID, err := postRequest("/posts", data)
+	postID, err := postRequest("/posts", data, "post_id")
 	if err != nil {
 		return 0, err
 	}
@@ -155,14 +105,6 @@ func AddVKPost(post vk.VKPost, channelID int, authorID *int) (int, error) {
 		addVKPostTag(postID, tagID)
 	}
 
-	// Добавить медиа из attachments
-	for _, att := range post.Attachments {
-		media := parseVKAttachment(att)
-		if media != nil {
-			AddVKMedia(*media, postID)
-		}
-	}
-
 	return postID, nil
 }
 
@@ -171,7 +113,7 @@ func AddVKAuthor(name string) (int, error) {
 	data := map[string]interface{}{
 		"name": name,
 	}
-	return postRequest("/authors", data)
+	return postRequest("/authors", data, "author_id")
 }
 
 // Функция для добавления текста новости (news_texts)
@@ -179,47 +121,7 @@ func AddVKNewsText(text string) (int, error) {
 	data := map[string]interface{}{
 		"text": text,
 	}
-	_, err := postRequest("/news_texts", data)
-	if err != nil {
-		return 0, err
-	}
-	type news_text struct {
-		Address string `json:"text"`
-		Text_id int    `json:"text_id"`
-	}
-
-	url := baseURL + "/sources"
-	// Отправляем GET-запрос
-	resp, err := http.Get(url)
-	if err != nil {
-		return 0, fmt.Errorf("failed to send GET request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	// Проверяем статус-код
-	if resp.StatusCode != http.StatusOK {
-		return 0, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
-	}
-
-	// Декодируем JSON-ответ в срез структур
-	var sources []Source
-	if err := json.NewDecoder(resp.Body).Decode(&sources); err != nil {
-		return 0, fmt.Errorf("failed to decode JSON response: %w", err)
-	}
-
-	// Ищем source по имени
-	for _, source := range sources {
-		if source.Name == "VK" {
-			// Конвертируем source_id из строки в int (поскольку foreign key в БД, вероятно, int)
-			sourceID, err := strconv.Atoi(source.SourceID)
-			if err != nil {
-				return 0, fmt.Errorf("failed to convert source_id to int: %w", err)
-			}
-			return sourceID, nil
-		}
-	}
-
-	return
+	return postRequest("/news_texts", data, "text_id")
 }
 
 // Функция для добавления тега (tags)
@@ -227,7 +129,7 @@ func addVKTag(name string) (int, error) {
 	data := map[string]interface{}{
 		"name": name,
 	}
-	return postRequest("/tags", data)
+	return postRequest("/tags", data, "tag_id")
 }
 
 // Функция для связи поста и тега (post_tags)
@@ -236,7 +138,7 @@ func addVKPostTag(postID, tagID int) error {
 		"post_id": postID,
 		"tag_id":  tagID,
 	}
-	_, err := postRequest("/post_tags", data)
+	_, err := postRequest("/post_tags", data, "tag_id")
 	return err
 }
 
@@ -248,7 +150,6 @@ func AddVKComment(comment vk.VKComment, postID int, parentID *int) error {
 	if authorName == "" {
 		authorName = fmt.Sprintf("User %d", comment.FromID)
 	}
-	// Предполагаем, что authors уникальны по name, так что добавим или получим
 	_, err := AddVKAuthor(authorName) // Если уже есть, сервер вернёт существующий ID?
 	if err != nil {
 		return fmt.Errorf("failed to add comment author: %v", err)
@@ -263,13 +164,13 @@ func AddVKComment(comment vk.VKComment, postID int, parentID *int) error {
 		"created_at":        nil, // Если есть timestamp, добавь
 	}
 
-	commentID, err := postRequest("/comments", data)
+	commentID, err := postRequest("/comments", data, "comment_id")
 	if err != nil {
 		return err
 	}
 
 	// Рекурсивно добавить вложенные комментарии
-	for _, child := range comment.Thread {
+	for _, child := range comment.Thread.Items {
 		AddVKComment(child, postID, &commentID)
 	}
 
@@ -283,12 +184,14 @@ func AddVKMedia(media vk.VKMedia, postID int) error {
 		"media_content": media.URL,
 		"media_type":    media.Type,
 	}
-	_, err := postRequest("/media", data)
+
+	_, err := postRequest("/media", data, "media_id")
 	return err
 }
 
 // Вспомогательная функция для POST-запроса
-func postRequest(endpoint string, data map[string]interface{}) (int, error) {
+// возвращает ошибку и id сущности fieldName - название поля id сущности
+func postRequest(endpoint string, data map[string]interface{}, fieldName string) (int, error) {
 	jsonData, err := json.Marshal(data)
 	if err != nil {
 		return 0, err
@@ -308,32 +211,33 @@ func postRequest(endpoint string, data map[string]interface{}) (int, error) {
 		return 0, fmt.Errorf("failed to read response body: %v", err)
 	}
 
-	bodyStr := string(bodyBytes)
-
-	// Log the response for debugging (remove after fixing)
-	fmt.Printf("DEBUG: Response from %s: Status %d, Body: %s\n", endpoint, resp.StatusCode, bodyStr)
-
-	// Try to decode as JSON
-	var apiResp APIResponse
-	if err := json.NewDecoder(bytes.NewReader(bodyBytes)).Decode(&apiResp); err == nil {
-		// Successfully decoded JSON
-		if apiResp.Error != "" {
-			return 0, fmt.Errorf("API error: %s", apiResp.Error)
-		}
-		return apiResp.ID, nil
+	if bodyBytes[0] != '{' {
+		return 0, fmt.Errorf("error in response: %s", bodyBytes)
 	}
-
-	// If decoding failed, check if it's a plain text success message
-	if resp.StatusCode == http.StatusCreated || resp.StatusCode == http.StatusOK {
-		if strings.Contains(strings.ToLower(bodyStr), "added") || strings.Contains(strings.ToLower(bodyStr), "success") {
-			// Assume success, return ID=0 (since no ID provided in plain text)
-			fmt.Printf("INFO: Plain text success response, assuming ID=0 for %s\n", endpoint)
-			return 0, nil
-		}
-	}
-
 	// Otherwise, it's an error
-	return 0, fmt.Errorf("unexpected response: Status %d, Body: %s", resp.StatusCode, bodyStr)
+
+	var resp_unmarshal map[string]interface{}
+	err = json.Unmarshal(bodyBytes, &resp_unmarshal)
+	if err != nil {
+		return 0, err
+	}
+
+	fieldValue, exists := resp_unmarshal[fieldName]
+	if !exists {
+		return 0, fmt.Errorf("there is no field %s in response", fieldName)
+	}
+
+	strValue, ok := fieldValue.(string)
+	if !ok {
+		return 0, fmt.Errorf("field '%s' is not a string (got %T)", fieldName, fieldValue)
+	}
+
+	sourceId, err := strconv.Atoi(strValue)
+	if err != nil {
+		return 0, err
+	}
+
+	return sourceId, nil
 }
 
 // Вспомогательная функция для извлечения тегов из текста (#tag)
