@@ -9,11 +9,13 @@ import (
 	"researcher-vk/internal/vk"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Базовый URL сервера (из примеров curl)
-// const baseURL = "http://localhost:8080/api"
-const baseURL = "http://server:8080/api"
+const baseURL = "http://localhost:8080/api"
+
+//const baseURL = "http://server:8080/api"
 
 // Структура для ответа сервера (предполагаем, что сервер возвращает JSON с id или успехом)
 type APIResponse struct {
@@ -98,6 +100,7 @@ func AddVKChannel(group vk.VKGroup, sourceID int) (int, error) {
 // channelID - ID канала (группы), authorID - ID автора (если from_id > 0, иначе nil)
 // Извлекает теги из текста (#tag) и добавляет их
 func AddVKPost(post vk.VKPost, channelID int, authorID *int) (int, error) {
+	fmt.Printf("AddVKPost\n")
 	// Извлечь теги из текста
 	tags := extractTags(post.Text)
 
@@ -116,14 +119,17 @@ func AddVKPost(post vk.VKPost, channelID int, authorID *int) (int, error) {
 		authorID = &aid
 	}
 
+	t := time.Unix(post.Date, 0)                       // Создаём time.Time из Unix seconds
+	timeStampString := t.Format("2006-01-02 15:04:05") // Формат для PostgreSQL TIMESTAMP (YYYY-MM-DD HH:MM:SS)
+
 	data := map[string]interface{}{
 		"title":          fmt.Sprintf("Post %d", post.ID), // Или извлечь заголовок из текста
 		"author_id":      authorID,
-		"text_id":        nil, // Сначала добавим text, потом обновим post
+		"text_id":        nil, // Заглушка. Сначала добавим text, потом обновим post
 		"channel_id":     channelID,
 		"comments_count": post.Comments,
 		"likes_count":    post.Likes,
-		"created_at":     post.Date, // Unix timestamp, сервер конвертирует?
+		"created_at":     timeStampString,
 	}
 
 	// Сначала добавить текст новости (news_texts)
@@ -131,6 +137,7 @@ func AddVKPost(post vk.VKPost, channelID int, authorID *int) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("failed to add text: %v", err)
 	}
+	fmt.Printf("======================== textID = %d\n", textID)
 	data["text_id"] = textID
 
 	// Добавить пост
@@ -172,7 +179,47 @@ func AddVKNewsText(text string) (int, error) {
 	data := map[string]interface{}{
 		"text": text,
 	}
-	return postRequest("/news_texts", data)
+	_, err := postRequest("/news_texts", data)
+	if err != nil {
+		return 0, err
+	}
+	type news_text struct {
+		Address string `json:"text"`
+		Text_id int    `json:"text_id"`
+	}
+
+	url := baseURL + "/sources"
+	// Отправляем GET-запрос
+	resp, err := http.Get(url)
+	if err != nil {
+		return 0, fmt.Errorf("failed to send GET request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Проверяем статус-код
+	if resp.StatusCode != http.StatusOK {
+		return 0, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
+
+	// Декодируем JSON-ответ в срез структур
+	var sources []Source
+	if err := json.NewDecoder(resp.Body).Decode(&sources); err != nil {
+		return 0, fmt.Errorf("failed to decode JSON response: %w", err)
+	}
+
+	// Ищем source по имени
+	for _, source := range sources {
+		if source.Name == "VK" {
+			// Конвертируем source_id из строки в int (поскольку foreign key в БД, вероятно, int)
+			sourceID, err := strconv.Atoi(source.SourceID)
+			if err != nil {
+				return 0, fmt.Errorf("failed to convert source_id to int: %w", err)
+			}
+			return sourceID, nil
+		}
+	}
+
+	return
 }
 
 // Функция для добавления тега (tags)

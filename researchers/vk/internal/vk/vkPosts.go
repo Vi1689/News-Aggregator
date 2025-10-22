@@ -16,7 +16,7 @@ import (
 type VKPost struct {
 	ID          int                      `json:"id"`
 	Text        string                   `json:"text"`
-	Date        time.Time                `json:"date"` // Unix timestamp
+	Date        int64                    `json:"date"` // Unix timestamp
 	Likes       int                      `json:"likes_count"`
 	Reposts     int                      `json:"reposts_count"`
 	Comments    int                      `json:"comments_count"`
@@ -112,6 +112,7 @@ func GetGroupPosts(accessToken string, groupID int, count int) ([]VKPost, error)
 
 		// Читаем и парсим JSON
 		body, err := io.ReadAll(resp.Body)
+		fmt.Printf("GetGroupPosts body = %s...\n\n", body[:100])
 		if err != nil {
 			return nil, fmt.Errorf("ошибка чтения ответа: %w", err)
 		}
@@ -141,6 +142,7 @@ func GetGroupPosts(accessToken string, groupID int, count int) ([]VKPost, error)
 			} else {
 				post.AuthorName = "Неизвестный автор" // Если не найден
 			}
+			//post.Date = time.Unix(post.Date, 0)
 			// Извлекаем теги из текста
 			post.Tags = extractTags(post.Text)
 		}
