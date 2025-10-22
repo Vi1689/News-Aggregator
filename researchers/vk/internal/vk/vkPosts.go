@@ -16,7 +16,7 @@ import (
 type VKPost struct {
 	ID          int                      `json:"id"`
 	Text        string                   `json:"text"`
-	Date        int                      `json:"date"` // Unix timestamp
+	Date        time.Time                `json:"date"` // Unix timestamp
 	Likes       int                      `json:"likes_count"`
 	Reposts     int                      `json:"reposts_count"`
 	Comments    int                      `json:"comments_count"`
