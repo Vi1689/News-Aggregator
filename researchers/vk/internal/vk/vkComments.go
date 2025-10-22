@@ -16,14 +16,20 @@ type VKUser struct {
 	LastName  string `json:"last_name"`
 }
 
+// Структура для вложенных комментариев (thread) — НОВАЯ
+type VKThread struct {
+	Count int         `json:"count"` // Общее количество вложенных комментариев
+	Items []VKComment `json:"items"` // Массив вложенных комментариев
+}
+
 // Структура для комментария (с ветвлениями, ID родительского и автором)
 type VKComment struct {
-	ID         int         `json:"id"`
-	FromID     int         `json:"from_id"`
-	Text       string      `json:"text"`
-	ParentID   int         `json:"reply_to_comment"` // ID родительского комментария
-	AuthorName string      `json:"author_name"`      // Имя автора (добавлено)
-	Thread     []VKComment `json:"thread"`           // Вложенные комментарии (ответы)
+	ID         int      `json:"id"`
+	FromID     int      `json:"from_id"`
+	Text       string   `json:"text"`
+	ParentID   int      `json:"reply_to_comment"` // ID родительского комментария
+	AuthorName string   `json:"-"`                // Имя автора (заполняется вручную, не из JSON)
+	Thread     VKThread `json:"thread"`           // Вложенные комментарии как объект (изменено с []VKComment)
 }
 
 // Структура ответа от VK API для wall.getComments
@@ -58,8 +64,9 @@ func getAuthorName(fromID int, users map[int]VKUser, groups map[int]VKGroup) str
 func fillAuthorNames(comments []VKComment, users map[int]VKUser, groups map[int]VKGroup) {
 	for i := range comments {
 		comments[i].AuthorName = getAuthorName(comments[i].FromID, users, groups)
-		if len(comments[i].Thread) > 0 {
-			fillAuthorNames(comments[i].Thread, users, groups)
+		// Теперь проверяем Thread.Items (массив вложенных комментариев)
+		if len(comments[i].Thread.Items) > 0 {
+			fillAuthorNames(comments[i].Thread.Items, users, groups)
 		}
 	}
 }
@@ -97,14 +104,14 @@ func GetCommentsWithThreads(accessToken string, ownerID int, postID int, count i
 	}
 
 	// Читаем и парсим JSON
-	body, err := io.ReadAll(resp.Body)
+	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("ошибка чтения ответа: %w", err)
+		return nil, err
 	}
 
 	var vkResp VKCommentsResponse
-	if err := json.Unmarshal(body, &vkResp); err != nil {
-		return nil, fmt.Errorf("ошибка парсинга JSON: %w", err)
+	if err := json.Unmarshal(bodyBytes, &vkResp); err != nil {
+		return nil, err
 	}
 
 	// Создаём мапы для быстрого поиска профилей и групп
