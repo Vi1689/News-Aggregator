@@ -20,6 +20,9 @@ func MakeGroupsSlice(accessToken string, conf config.ResearcherConfig) ([]vk.VKG
 }
 
 func main() {
+	timer1 := time.NewTimer(time.Duration(30) * time.Second)
+	<-timer1.C
+
 	// автоматизация получения токена vk
 	/*go func() {
 		vkToken.GetValidToken()
