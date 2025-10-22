@@ -20,8 +20,8 @@ func MakeGroupsSlice(accessToken string, conf config.ResearcherConfig) ([]vk.VKG
 }
 
 func main() {
-	timer1 := time.NewTimer(time.Duration(30) * time.Second)
-	<-timer1.C
+	//timer1 := time.NewTimer(time.Duration(10) * time.Second)
+	//<-timer1.C
 
 	// автоматизация получения токена vk
 	/*go func() {
@@ -29,8 +29,8 @@ func main() {
 	}()*/
 	// вк = говно
 
-	accessTokenFileName := "/usr/local/etc/vk-researcher/access_token"
-	//accessTokenFileName := "access_token"
+	//accessTokenFileName := "/usr/local/etc/vk-researcher/access_token"
+	accessTokenFileName := "access_token"
 	accessToken, err := os.ReadFile(accessTokenFileName)
 	if err != nil {
 		fmt.Println(err)
@@ -57,9 +57,8 @@ func main() {
 			<-timer1.C
 			continue
 		}*/
-		//ConfigFileName := "../../config/researchers.xml"
-		ConfigFileName := "/usr/local/etc/vk-researcher/test_conf.xml"
-		//ConfigFileName := "test_conf.xml"
+		//ConfigFileName := "/usr/local/etc/vk-researcher/test_conf.xml"
+		ConfigFileName := "test_conf.xml"
 
 		xmlData, err := os.ReadFile(ConfigFileName)
 
@@ -98,20 +97,25 @@ func main() {
 				continue // Пропустить группу, если ошибка
 			}
 
+			fmt.Printf("---------------------------------------1\n")
 			postsSlice, _ := vk.GetGroupPosts(string(accessToken), group.ID, conf.Post_limit)
+			fmt.Printf("---------------------------------------2 len(postsSlice)=%d\n", len(postsSlice))
 
 			// TODO: отправить запросы на из добавление на сервер
 			for j, post := range postsSlice {
-				fmt.Printf("%d. %s [%d] %d\n", j+1, post.Text, post.Comments, post.Likes)
+				timer2 := time.NewTimer(time.Duration(2) * time.Second)
+				<-timer2.C
+				//fmt.Printf("---------------------------------------%d. %s [%d] %d\n", j+1, post.Text, post.Comments, post.Likes)
 				// запрос на добавление постов
 				postID, err := sendRequests.AddVKPost(post, channelID, nil)
 				if err != nil {
-					fmt.Printf("Failed to add post %d: %v\n", post.ID, err)
+					fmt.Printf("Failed to add post [%d]%d(%d): %v\n", j, post.ID, postID, err)
 					continue
 				}
+				fmt.Printf("added post %d", postID)
 
 				// получить комментарии
-				commentsSlice, _ := vk.GetCommentsWithThreads(string(accessToken), post.AuthorID, post.ID, conf.Comment_limit)
+				/*commentsSlice, _ := vk.GetCommentsWithThreads(string(accessToken), post.AuthorID, post.ID, conf.Comment_limit)
 				// отправить на сервер
 				for k, comment := range commentsSlice {
 					fmt.Printf("=================================%d. %s %s\n", k+1, comment.AuthorName, comment.Text)
@@ -129,7 +133,7 @@ func main() {
 					if err != nil {
 						fmt.Printf("Failed to add media: %v\n", err)
 					}
-				}
+				}*/
 			}
 
 			// получить медиа
