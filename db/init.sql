@@ -55,7 +55,7 @@ CREATE TABLE IF NOT EXISTS posts (
 CREATE TABLE IF NOT EXISTS media (
     media_id SERIAL PRIMARY KEY,
     post_id INT REFERENCES posts(post_id) ON DELETE CASCADE,
-    media_content VARCHAR(255),
+    media_content VARCHAR(1000),
     media_type VARCHAR(50) DEFAULT 'image'
 );
 
