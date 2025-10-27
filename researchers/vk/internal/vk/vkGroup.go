@@ -45,7 +45,7 @@ type VKGroupsSearchResponse struct {
 }
 
 // Функция для поиска n самых популярных групп VK
-func GetTopPopularGroups(accessToken string, n int) ([]VKGroup, error) {
+func GetTopPopularGroups(accessToken string, count int, offset int) ([]VKGroup, error) {
 	// Базовый URL VK API для поиска групп
 	baseURL := "https://api.vk.com/method/groups.search"
 
@@ -56,12 +56,13 @@ func GetTopPopularGroups(accessToken string, n int) ([]VKGroup, error) {
 	params.Set("q", "")                                             // Пустой запрос для поиска всех групп
 	params.Set("type", "group")                                     // Тип: группы
 	params.Set("sort", "6")                                         // Сортировка: по количеству участников (убывание)
-	params.Set("count", strconv.Itoa(n))                            // Количество результатов
+	params.Set("count", strconv.Itoa(count))                        // Количество результатов
+	params.Set("offset", strconv.Itoa(offset))                      // смещение этих самых результатов
 	params.Set("fields", "members_count,name,screen_name,contacts") // Поля для получения (добавлено contacts)
 
 	// Формируем полный URL
 	fullURL := baseURL + "?" + params.Encode()
-	fmt.Printf("%s\n", fullURL)
+	//fmt.Printf("%s\n", fullURL)
 
 	// Делаем HTTP GET запрос
 	resp, err := http.Get(fullURL)
@@ -81,6 +82,8 @@ func GetTopPopularGroups(accessToken string, n int) ([]VKGroup, error) {
 	if err != nil {
 		return nil, fmt.Errorf("ошибка чтения ответа: %w", err)
 	}
+
+	//fmt.Printf("\n===================================\nbody = %s\n===============================================\n\n", body)
 
 	var vkResp VKGroupsResponse
 	if err := json.Unmarshal(body, &vkResp); err != nil {

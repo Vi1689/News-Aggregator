@@ -73,4 +73,7 @@ services:
     volumes:
       - ./config/researchers.xml:/usr/local/etc/vk-researcher/test_conf.xml
       - ./researchers/vk/access_token:/usr/local/etc/vk-researcher/access_token
-      
+
+volumes:
+  postgres_master_data:
+  postgres_replica_data:
