@@ -11,10 +11,13 @@ import (
 	_ "researcher-vk/internal/vkToken"
 )
 
+var groupOffset int
+
 func MakeGroupsSlice(accessToken string, conf config.ResearcherConfig) ([]vk.VKGroup, error) {
 	if len(conf.Preferred_channels) == 0 {
-		return vk.GetTopPopularGroups(accessToken, conf.Channel_limit)
+		return vk.GetTopPopularGroups(accessToken, conf.Channel_limit, groupOffset)
 	}
+	groupOffset += conf.Channel_limit
 	return vk.GetGroupsByFullNames(accessToken, conf.Preferred_channels, conf.Channel_limit)
 }
 
@@ -45,6 +48,7 @@ func main() {
 		fmt.Printf("sourceID = %d\n\n", sourceID)
 	}
 
+	groupOffset = 0
 	for {
 		fmt.Printf("New Scan\n")
 		//accessToken := vkToken.GetAccessToken()
@@ -110,7 +114,7 @@ func main() {
 					continue
 				}
 				// получить комментарии
-				commentsSlice, err := vk.GetCommentsWithThreads(string(accessToken), post.AuthorID, post.ID, conf.Comment_limit)
+				/*commentsSlice, err := vk.GetCommentsWithThreads(string(accessToken), post.AuthorID, post.ID, conf.Comment_limit)
 				if err != nil {
 					fmt.Printf("Failed to get comments: %v\n", err)
 					continue
@@ -122,7 +126,7 @@ func main() {
 					if err != nil {
 						fmt.Printf("Failed to add comment: %v\n", err)
 					}
-				}
+				}*/
 
 				MediaSlice, _ := vk.GetMediaFromPosts(string(accessToken), post.AuthorID, conf.Media_limit)
 				fmt.Printf("=================================len(MediaSlice)=%d\n", len(MediaSlice))
@@ -135,11 +139,9 @@ func main() {
 					}
 				}
 			}
-
-			// получить медиа
 		}
 
-		timer1 := time.NewTimer(time.Duration(conf.Research_period) * time.Minute)
+		timer1 := time.NewTimer(time.Duration(conf.Research_period) * time.Second)
 		<-timer1.C
 	}
 
