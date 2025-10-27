@@ -53,7 +53,7 @@ private:
   std::condition_variable cv_;
 };
 
-const std::string CONN_STR = "host=db "
+const std::string CONN_STR = "host=db-master "
                              "port=5432 "
                              "dbname=news_db "
                              "user=news_user "
