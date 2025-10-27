@@ -11,7 +11,7 @@ int main() {
     httplib::Server svr;
     
     // Инициализация компонентов
-    PgPool pool(constants::CONN_STRINGS);
+    PgPool pool(constants::CONN_STRINGS, constants::POOL_SIZE);
     CacheManager cache;
     Handlers handlers(pool, cache);
     

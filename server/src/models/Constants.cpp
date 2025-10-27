@@ -6,6 +6,8 @@ namespace constants {
         "host=db-replica port=5432 dbname=news_db user=news_user password=news_pass"
     };
 
+    const size_t POOL_SIZE = 4;  // Размер пула соединений
+
     const std::unordered_map<std::string, std::string> pk_map = {
         {"users", "user_id"},       {"authors", "author_id"},
         {"news_texts", "text_id"},  {"sources", "source_id"},

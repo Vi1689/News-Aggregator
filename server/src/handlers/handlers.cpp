@@ -82,7 +82,7 @@ void Handlers::createHandler(const httplib::Request& req, httplib::Response& res
         // Для записи используем только МАСТЕР (read_only = false)
         auto pconn = pool_.acquire(false);
         std::cout << "Using " << (pconn.is_replica ? "REPLICA" : "MASTER")
-                  << " for WRITE operation" << std::endl;
+                  << " for WRITE operation on table: " << table << std::endl;
 
         pqxx::work txn(*pconn.conn);
 
@@ -119,6 +119,10 @@ void Handlers::createHandler(const httplib::Request& req, httplib::Response& res
         cache_.del("cache:" + table);
 
         res.set_content(obj.dump(2), "application/json");
+    } catch (const std::runtime_error& e) {
+        // Таймаут или проблемы с подключением к БД
+        res.status = 503; // Service Unavailable
+        res.set_content(std::string("Database temporarily unavailable: ") + e.what(), "text/plain");
     } catch (const std::exception& e) {
         res.status = 500;
         res.set_content(std::string("Error: ") + e.what(), "text/plain");
@@ -144,7 +148,7 @@ void Handlers::readAllHandler(const httplib::Request& req, httplib::Response& re
         // Для чтения используем РЕПЛИКУ (read_only = true)
         auto pconn = pool_.acquire(true);
         std::cout << "Using " << (pconn.is_replica ? "REPLICA" : "MASTER")
-                  << " for READ operation" << std::endl;
+                  << " for READ operation on table: " << table << std::endl;
 
         pqxx::work txn(*pconn.conn);
 
@@ -165,6 +169,10 @@ void Handlers::readAllHandler(const httplib::Request& req, httplib::Response& re
 
         res.set_content(arr.dump(2), "application/json");
         cache_.setex("cache:" + table, 300, arr.dump(2)); // TTL 5 минут
+    } catch (const std::runtime_error& e) {
+        // Таймаут или проблемы с подключением к БД
+        res.status = 503; // Service Unavailable
+        res.set_content(std::string("Database temporarily unavailable: ") + e.what(), "text/plain");
     } catch (const std::exception& e) {
         res.status = 500;
         res.set_content(std::string("Error: ") + e.what(), "text/plain");
@@ -217,6 +225,9 @@ void Handlers::readOneHandler(const httplib::Request& req, httplib::Response& re
 
                 res.set_content(arr.dump(2), "application/json");
                 cache_.setex(cache_key, 600, arr.dump(2)); // TTL 10 минут
+            } catch (const std::runtime_error& e) {
+                res.status = 503;
+                res.set_content(std::string("Database temporarily unavailable: ") + e.what(), "text/plain");
             } catch (const std::exception& e) {
                 res.status = 500;
                 res.set_content(e.what(), "text/plain");
@@ -261,6 +272,10 @@ void Handlers::readOneHandler(const httplib::Request& req, httplib::Response& re
 
         res.set_content(arr.dump(2), "application/json");
         cache_.setex("cache:" + table + ":" + id, 600, arr.dump(2)); // TTL 10 минут
+    } catch (const std::runtime_error& e) {
+        // Таймаут или проблемы с подключением к БД
+        res.status = 503; // Service Unavailable
+        res.set_content(std::string("Database temporarily unavailable: ") + e.what(), "text/plain");
     } catch (const std::exception& e) {
         res.status = 500;
         res.set_content(std::string("Error: ") + e.what(), "text/plain");
@@ -329,6 +344,10 @@ void Handlers::updateHandler(const httplib::Request& req, httplib::Response& res
         cache_.del("cache:" + table);
         cache_.del("cache:" + table + ":" + id);
         res.set_content("Item updated\n", "text/plain");
+    } catch (const std::runtime_error& e) {
+        // Таймаут или проблемы с подключением к БД
+        res.status = 503; // Service Unavailable
+        res.set_content(std::string("Database temporarily unavailable: ") + e.what(), "text/plain");
     } catch (const std::exception& e) {
         res.status = 500;
         res.set_content(std::string("Error: ") + e.what(), "text/plain");
@@ -369,6 +388,10 @@ void Handlers::deleteHandler(const httplib::Request& req, httplib::Response& res
         cache_.del("cache:" + table);
         cache_.del("cache:" + table + ":" + id);
         res.set_content("Item deleted\n", "text/plain");
+    } catch (const std::runtime_error& e) {
+        // Таймаут или проблемы с подключением к БД
+        res.status = 503; // Service Unavailable
+        res.set_content(std::string("Database temporarily unavailable: ") + e.what(), "text/plain");
     } catch (const std::exception& e) {
         res.status = 500;
         res.set_content(std::string("Error: ") + e.what(), "text/plain");
@@ -399,7 +422,7 @@ void Handlers::handlePostTags(const httplib::Request& req, httplib::Response& re
             cache_.del("cache:post_tags:" + post_id + ":" + tag_id);
             cache_.del("cache:posts:" + post_id);
         } else {
-            // Для операций чтения post_tags (если понадобится)
+            // Для операций чтения post_tags
             std::string sql_query = "SELECT * FROM post_tags WHERE post_id=$1 AND tag_id=$2";
             pqxx::result r = txn.exec_params(sql_query, post_id, tag_id);
 
@@ -417,6 +440,10 @@ void Handlers::handlePostTags(const httplib::Request& req, httplib::Response& re
 
             res.set_content(arr.dump(2), "application/json");
         }
+    } catch (const std::runtime_error& e) {
+        // Таймаут или проблемы с подключением к БД
+        res.status = 503; // Service Unavailable
+        res.set_content(std::string("Database temporarily unavailable: ") + e.what(), "text/plain");
     } catch (const std::exception& e) {
         res.status = 500;
         res.set_content(e.what(), "text/plain");
