@@ -48,20 +48,35 @@ services:
       test: ["CMD-SHELL", "pg_isready -U news_user -d news_db"]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
+      start_period: 30s
 
   redis:
     image: redis:7
     ports:
       - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
 
   server:
     build:
       context: .
       dockerfile: ./server/Dockerfile
     depends_on:
+      redis:
+        condition: service_healthy
       db-master:
         condition: service_healthy
+      db-replica:
+        condition: service_healthy
+    environment:
+      - WAIT_HOSTS=db-master:5432,db-replica:5432,redis:6379
+      - WAIT_HOSTS_TIMEOUT=300
+      - WAIT_SLEEP_INTERVAL=5
+      - WAIT_HOST_CONNECT_TIMEOUT=30
     ports:
       - "8080:8080"
 
