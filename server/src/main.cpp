@@ -1,3 +1,4 @@
+// #include "/media/vitalii/medio/study/News-Aggregator/cpp-httplib/httplib.h"
 #include "httplib.h"
 #include <chrono>
 #include <nlohmann/json.hpp>
@@ -357,7 +358,7 @@ int main() {
               }
 
               res.set_content(arr.dump(2), "application/json");
-              redis.set("cache:" + table, arr.dump(2));
+              redis.setex("cache:" + table, 300, arr.dump(2)); // TTL 5 минут
             } catch (const std::exception &e) {
               res.status = 500;
               res.set_content(std::string("Error: ") + e.what(), "text/plain");
@@ -413,7 +414,7 @@ int main() {
                   }
 
                   res.set_content(arr.dump(2), "application/json");
-                  redis.set(cache_key, arr.dump(2));
+                  redis.setex(cache_key, 600, arr.dump(2)); // TTL 10 минут
                 } catch (const std::exception &e) {
                   res.status = 500;
                   res.set_content(e.what(), "text/plain");
@@ -458,7 +459,7 @@ int main() {
               }
 
               res.set_content(arr.dump(2), "application/json");
-              redis.set("cache:" + table + ":" + id, arr.dump(2));
+              redis.setex("cache:" + table + ":" + id, 600, arr.dump(2)); // TTL 10 минут
             } catch (const std::exception &e) {
               res.status = 500;
               res.set_content(std::string("Error: ") + e.what(), "text/plain");
