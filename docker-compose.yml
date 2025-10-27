@@ -100,12 +100,24 @@ services:
       POSTGRES_PASSWORD: news_pass
     volumes:
       - ./backups:/backups
+      - ./db:/db:ro  # ← ДОБАВИТЬ ЭТОТ volume
+      - ./docker-compose.yml:/backups/../docker-compose.yml:ro  # ← И ЭТОТ
       - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       db-master:
         condition: service_healthy
       db-replica:
         condition: service_healthy
+    command: >
+      sh -c "
+        echo '=== Backup Service Started ===' &&
+        crontab /backups/scripts/crontab.config &&
+        /backups/scripts/backup-master.sh &&
+        echo 'Starting cron...' &&
+        cron -f -L /backups/logs/cron.log
+      "
+    profiles:
+      - backup
     healthcheck:
       test: ["CMD-SHELL", "ps aux | grep cron | grep -v grep"]
       interval: 30s
