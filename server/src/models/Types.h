@@ -6,8 +6,8 @@
 class PgPool;
 
 struct PConn {
-    std::shared_ptr<pqxx::connection> conn;
-    PgPool* pool;
-    bool is_replica;
-    ~PConn();
+  std::shared_ptr<pqxx::connection> conn;
+  PgPool *pool;
+  bool is_replica;
+  ~PConn();
 };
