@@ -84,7 +84,9 @@ services:
     build:
       context: .
       dockerfile: ./researchers/vk/Dockerfile
-
+    depends_on:
+      server:
+        condition: service_started
     volumes:
       - ./config/researchers.xml:/usr/local/etc/vk-researcher/test_conf.xml
       - ./researchers/vk/access_token:/usr/local/etc/vk-researcher/access_token
