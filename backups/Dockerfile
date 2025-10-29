@@ -1,22 +1,11 @@
 FROM postgres:15
 
-# Устанавливаем cron и docker-cli
-RUN apt-get update && apt-get install -y \
-    cron \
-    docker.io \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/* && apt-get clean
 
-# Создаем директории
-RUN mkdir -p /backups/{scripts,data,daily,weekly,monthly,logs}
+RUN mkdir -p /backups/{scripts,data,logs}
 
-# Копируем скрипты
 COPY scripts/ /backups/scripts/
 
-# Делаем скрипты исполняемыми
 RUN chmod +x /backups/scripts/*.sh
 
-# Устанавливаем cron задачу
-RUN crontab /backups/scripts/crontab.config
-
-CMD ["sh", "-c", "echo '=== Backup Service Started ===' && /backups/scripts/backup-master.sh && echo 'Starting cron...' && cron -f -L /backups/logs/cron.log"]
+CMD ["/bin/bash", "-c", "echo '=== Database Backup Service Started ===' && while true; do /backups/scripts/backup-master.sh; echo 'Sleeping for 24 hours...'; sleep 86400; done"]
