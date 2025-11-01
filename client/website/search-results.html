@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Результаты поиска - BongoNews</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/bongo-cat.css">
+</head>
+<body>
+    <!-- Header -->
+    <header class="header">
+        <div class="container header-content">
+            <div class="logo">
+                <i class="fas fa-drum"></i>
+                <a href="index.html" style="color: white; text-decoration: none;">BongoNews</a>
+            </div>
+            <nav class="nav">
+                <a href="index.html" class="nav-item">Главная</a>
+                <a href="#" class="nav-item">Популярное</a>
+                <a href="#" class="nav-item">Категории</a>
+                <a href="#" class="nav-item">Закладки</a>
+            </nav>
+        </div>
+    </header>
+
+    <!-- Search Section -->
+    <section class="container search-section" style="margin-top: 40px;">
+        <div class="search-container">
+            <input type="text" class="search-input" id="search-input" placeholder="Поиск по темам, ключевым словам...">
+            <button class="search-btn" id="search-btn"><i class="fas fa-search"></i> Найти</button>
+        </div>
+        <div class="popular-searches">
+            <span class="search-tag">Технологии</span>
+            <span class="search-tag">Программирование</span>
+            <span class="search-tag">Искусственный интеллект</span>
+            <span class="search-tag">Криптовалюты</span>
+            <span class="search-tag">Дизайн</span>
+            <span class="search-tag">Стартапы</span>
+            <span class="search-tag">Наука</span>
+            <span class="search-tag">Игры</span>
+        </div>
+    </section>
+
+    <!-- Results Section -->
+    <main class="container main-content">
+        <div id="search-results-header">
+            <h2 class="section-title"><i class="fas fa-search"></i> Результаты поиска</h2>
+            <div id="search-info" class="search-info"></div>
+        </div>
+        
+        <!-- Фильтры -->
+        <div class="filters">
+            <button class="filter-btn active" data-category="all">Все</button>
+            <button class="filter-btn" data-category="technology">Технологии</button>
+            <button class="filter-btn" data-category="science">Наука</button>
+            <button class="filter-btn" data-category="culture">Культура</button>
+        </div>
+        
+        <div class="news-grid" id="search-results-container"></div>
+        
+        <div id="no-results" class="no-results" style="display: none;">
+            <div class="loading">
+                <i class="fas fa-search" style="font-size: 3rem; margin-bottom: 20px; color: #b084eb;"></i>
+                <h3>Ничего не найдено</h3>
+                <p>Попробуйте изменить поисковый запрос или использовать другие ключевые слова</p>
+                <button class="search-btn" onclick="window.location.href='index.html'" style="margin-top: 20px;">
+                    <i class="fas fa-arrow-left"></i> Вернуться на главную
+                </button>
+            </div>
+        </div>
+    </main>
+
+    <!-- Bongo Cat -->
+    <div class="bongo-cat-container">
+        <div class="heart-bubble" id="heart-bubble">❤️ +1</div>
+        <!-- SVG будет вставлено через JavaScript -->
+    </div>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container footer-content">
+            <div class="footer-section">
+                <h3 class="footer-title">BongoNews</h3>
+                <p>Агрегатор новостей с характером. Каждый лайк - это барабанная дробь нашего кота!</p>
+            </div>
+            <div class="footer-section">
+                <h3 class="footer-title">Источники</h3>
+                <ul class="footer-links">
+                    <li><a href="#">Reddit</a></li>
+                    <li><a href="#">Hacker News</a></li>
+                    <li><a href="#">Medium</a></li>
+                    <li><a href="#">Product Hunt</a></li>
+                    <li><a href="#">Twitter</a></li>
+                </ul>
+            </div>
+            <div class="footer-section">
+                <h3 class="footer-title">Помощь</h3>
+                <ul class="footer-links">
+                    <li><a href="index.html">Главная</a></li>
+                    <li><a href="#">Контакты</a></li>
+                    <li><a href="#">Политика конфиденциальности</a></li>
+                    <li><a href="#">Условия использования</a></li>
+                </ul>
+            </div>
+        </div>
+        <div class="container copyright">
+            <p>© 2023 BongoNews. Все права защищены. С любовью и ритмом! 🥁</p>
+        </div>
+    </footer>
+
+    <script src="js/bongo-cat.js"></script>
+    <script src="js/search-results.js"></script>
+</body>
+</html>

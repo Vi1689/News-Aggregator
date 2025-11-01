@@ -7,3 +7,5 @@ main
 !.gitignore
 *.[oad]
 
+!client/website/
+!client/website/**/*

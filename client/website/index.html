@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BongoNews - Агрегатор новостей с характером</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/bongo-cat.css">
+</head>
+<body>
+    <!-- Header -->
+    <header class="header">
+        <div class="container header-content">
+            <div class="logo">
+                <i class="fas fa-drum"></i>
+                BongoNews
+            </div>
+<nav class="nav">
+    <a href="#" class="nav-item">Главная</a>
+    <a href="#" class="nav-item">Популярное</a>
+    <a href="#" class="nav-item">Категории</a>
+    <a href="#" class="nav-item" id="settings-btn">Настройки</a>
+</nav>
+        </div>
+    </header>
+
+    <!-- Hero Section -->
+    <section class="hero">
+        <div class="container hero-content">
+            <h1>Новости с ритмом!</h1>
+            <p>BongoNews - агрегатор контента, где каждая новость находит свой ритм</p>
+        </div>
+    </section>
+
+    <!-- Search Section -->
+    <section class="container search-section">
+        <div class="search-container">
+            <input type="text" class="search-input" placeholder="Поиск по темам, ключевым словам...">
+            <button class="search-btn"><i class="fas fa-search"></i> Найти</button>
+        </div>
+        <div class="popular-searches">
+            <span class="search-tag">Технологии</span>
+            <span class="search-tag">Программирование</span>
+            <span class="search-tag">Искусственный интеллект</span>
+            <span class="search-tag">Криптовалюты</span>
+            <span class="search-tag">Дизайн</span>
+            <span class="search-tag">Стартапы</span>
+            <span class="search-tag">Наука</span>
+            <span class="search-tag">Игры</span>
+        </div>
+    </section>
+
+    <!-- Main Content -->
+    <main class="container main-content">
+        <h2 class="section-title"><i class="fas fa-fire"></i> Популярные посты</h2>
+        <!-- Фильтры -->
+        <div class="filters">
+            <button class="filter-btn active" data-category="all">Все</button>
+            <button class="filter-btn" data-category="technology">Технологии</button>
+            <button class="filter-btn" data-category="science">Наука</button>
+            <button class="filter-btn" data-category="culture">Культура</button>
+        </div>
+        <div class="news-grid" id="news-container"></div>
+        <h2 class="section-title"><i class="fas fa-history"></i> Недавно просмотренные</h2>
+        <div class="news-grid" id="recent-container"></div>
+    </main>
+
+    <!-- Bongo Cat -->
+    <div class="bongo-cat-container">
+        <div class="heart-bubble" id="heart-bubble">❤️ +1</div>
+        <!-- SVG будет вставлено через JavaScript -->
+    </div>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container footer-content">
+            <div class="footer-section">
+                <h3 class="footer-title">BongoNews</h3>
+                <p>Агрегатор новостей с характером. Каждый лайк - это барабанная дробь нашего кота!</p>
+            </div>
+            <div class="footer-section">
+                <h3 class="footer-title">Источники</h3>
+                <ul class="footer-links">
+                    <li><a href="#">Reddit</a></li>
+                    <li><a href="#">Hacker News</a></li>
+                    <li><a href="#">Medium</a></li>
+                    <li><a href="#">Product Hunt</a></li>
+                    <li><a href="#">Twitter</a></li>
+                </ul>
+            </div>
+            <div class="footer-section">
+                <h3 class="footer-title">Помощь</h3>
+                <ul class="footer-links">
+                    <li><a href="#">О проекте</a></li>
+                    <li><a href="#">Контакты</a></li>
+                    <li><a href="#">Политика конфиденциальности</a></li>
+                    <li><a href="#">Условия использования</a></li>
+                </ul>
+            </div>
+        </div>
+        <div class="container copyright">
+            <p>© 2023 BongoNews. Все права защищены. С любовью и ритмом! 🥁</p>
+        </div>
+    </footer>
+
+<!-- Модальное окно настроек -->
+<div id="settings-modal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h2><i class="fas fa-cog"></i> Настройки</h2>
+            <button class="close-btn" id="close-settings">&times;</button>
+        </div>
+        <div class="modal-body">
+            <div class="setting-group">
+                <h3>Тема оформления</h3>
+                <div class="theme-options">
+                    <label class="theme-option">
+                        <input type="radio" name="theme" value="light" checked>
+                        <span class="theme-preview light-theme">
+                            <i class="fas fa-sun"></i>
+                            Светлая
+                        </span>
+                    </label>
+                    <label class="theme-option">
+                        <input type="radio" name="theme" value="dark">
+                        <span class="theme-preview dark-theme">
+                            <i class="fas fa-moon"></i>
+                            Тёмная
+                        </span>
+                    </label>
+                    <label class="theme-option">
+                        <input type="radio" name="theme" value="auto">
+                        <span class="theme-preview auto-theme">
+                            <i class="fas fa-adjust"></i>
+                            Авто
+                        </span>
+                    </label>
+                </div>
+            </div>
+
+            <div class="setting-group">
+                <h3>Размер текста</h3>
+                <div class="text-size-options">
+                    <label class="size-option">
+                        <input type="radio" name="text-size" value="small">
+                        <span>Маленький</span>
+                    </label>
+                    <label class="size-option">
+                        <input type="radio" name="text-size" value="medium" checked>
+                        <span>Средний</span>
+                    </label>
+                    <label class="size-option">
+                        <input type="radio" name="text-size" value="large">
+                        <span>Большой</span>
+                    </label>
+                </div>
+            </div>
+
+            <div class="setting-group">
+                <h3>Уведомления</h3>
+                <div class="switch-group">
+                    <label class="switch">
+                        <input type="checkbox" id="email-notifications" checked>
+                        <span class="slider"></span>
+                        <span class="switch-label">Email уведомления</span>
+                    </label>
+                    <label class="switch">
+                        <input type="checkbox" id="push-notifications">
+                        <span class="slider"></span>
+                        <span class="switch-label">Push-уведомления</span>
+                    </label>
+                    <label class="switch">
+                        <input type="checkbox" id="newsletter" checked>
+                        <span class="slider"></span>
+                        <span class="switch-label">Еженедельная рассылка</span>
+                    </label>
+                </div>
+            </div>
+
+            <div class="setting-group">
+                <h3>Язык</h3>
+                <select class="language-select" id="language-select">
+                    <option value="ru" selected>Русский</option>
+                    <option value="en">English</option>
+                    <option value="es">Español</option>
+                    <option value="de">Deutsch</option>
+                </select>
+            </div>
+
+            <div class="setting-group">
+                <h3>Сброс данных</h3>
+                <div class="reset-options">
+                    <button class="reset-btn" id="reset-likes">
+                        <i class="fas fa-heart"></i>
+                        Сбросить лайки
+                    </button>
+                    <button class="reset-btn" id="reset-settings">
+                        <i class="fas fa-undo"></i>
+                        Сбросить настройки
+                    </button>
+                </div>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn-secondary" id="cancel-settings">Отмена</button>
+            <button class="btn-primary" id="save-settings">Сохранить</button>
+        </div>
+    </div>
+</div>
+
+    <script src="js/bongo-cat.js"></script>
+    <script src="js/app.js"></script>
+
+
+</body>
+</html>
