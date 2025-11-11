@@ -6,8 +6,8 @@
 
 using json = nlohmann::json;
 
-Handlers::Handlers(PgPool &pool, CacheManager &cache)
-    : pool_(pool), cache_(cache) {}
+Handlers::Handlers(PgPool &pool, CacheManager &cache, MongoManager &mongo)
+    : pool_(pool), cache_(cache), mongo_(mongo) {}
 
 void Handlers::setupRoutes(httplib::Server &svr) {
   // ДОБАВЛЕНИЕ ЗАПИСИ
@@ -39,6 +39,19 @@ void Handlers::setupRoutes(httplib::Server &svr) {
              [this](const httplib::Request &req, httplib::Response &res) {
                this->deleteHandler(req, res);
              });
+
+// НОВЫЕ MONGO-РОУТЫ
+    svr.Get("/api/search/posts", [this](const httplib::Request &req, httplib::Response &res) {
+        this->searchPostsHandler(req, res);
+    });
+    
+    svr.Get("/api/analytics/dashboard", [this](const httplib::Request &req, httplib::Response &res) {
+        this->dashboardHandler(req, res);
+    });
+    
+    svr.Get("/api/posts/(\\d+)/similar", [this](const httplib::Request &req, httplib::Response &res) {
+        this->similarPostsHandler(req, res);
+    });
 }
 
 void Handlers::createHandler(const httplib::Request &req,
@@ -50,6 +63,29 @@ void Handlers::createHandler(const httplib::Request &req,
       res.set_content("Table not found", "text/plain");
       return;
     }
+
+ // ПРОВЕРКА ДУБЛИКАТОВ ТОЛЬКО ДЛЯ POSTS
+        if (table == "posts") {
+            auto data = json::parse(req.body);
+            
+            if (data.contains("title") && data.contains("content")) {
+                std::string title = data["title"];
+                std::string content = data["content"];
+                
+                // Генерируем хеш контента
+                std::string content_hash = std::to_string(
+                    std::hash<std::string>{}(title + content)
+                );
+                
+                // Проверяем дубликат в MongoDB
+                if (mongo_.isDuplicateContent(content_hash)) {
+                    res.status = 409;
+                    res.set_content("Duplicate post detected", "text/plain");
+                    return;
+                }
+            }
+        }
+
     auto data = json::parse(req.body);
 
     std::vector<std::string> cols;
@@ -116,6 +152,21 @@ void Handlers::createHandler(const httplib::Request &req,
       else
         obj[field.name()] = field.c_str();
     }
+
+ // ИНДЕКСИРУЕМ НОВЫЙ POST В MONGODB
+        if (table == "posts") {
+            int post_id = row["post_id"].as<int>();
+            std::string title = data["title"];
+            std::string content = data["content"];
+            
+            // Получаем теги если они есть
+            std::vector<std::string> tags;
+            if (data.contains("tags")) {
+                tags = data["tags"].get<std::vector<std::string>>();
+            }
+            
+            mongo_.indexPost(post_id, title, content, tags);
+        }
 
     cache_.del("cache:" + table);
 
@@ -353,6 +404,21 @@ void Handlers::updateHandler(const httplib::Request &req,
     txn.exec(sql_query);
     txn.commit();
 
+    // ОБНОВЛЯЕМ ИНДЕКС В MONGODB ДЛЯ POSTS
+if (table == "posts") {
+            auto data = json::parse(req.body);
+            
+            std::string title, content;
+            std::vector<std::string> tags;
+            
+            if (data.contains("title")) title = data["title"];
+            if (data.contains("content")) content = data["content"];
+            if (data.contains("tags")) tags = data["tags"].get<std::vector<std::string>>();
+            
+            int post_id = std::stoi(id);
+            mongo_.updatePostIndex(post_id, title, content, tags);
+        }
+
     cache_.del("cache:" + table);
     cache_.del("cache:" + table + ":" + id);
     res.set_content("Item updated\n", "text/plain");
@@ -377,6 +443,12 @@ void Handlers::deleteHandler(const httplib::Request &req,
       res.set_content("Table not found", "text/plain");
       return;
     }
+
+   // УДАЛЯЕМ ИЗ ИНДЕКСА MONGODB ДЛЯ POSTS
+        if (table == "posts") {
+            int post_id = std::stoi(id);
+            mongo_.removePostIndex(post_id);
+        }
 
     if (table == "post_tags") {
       handlePostTags(req, res, true);
@@ -471,4 +543,121 @@ void Handlers::handlePostTags(const httplib::Request &req,
     res.status = 500;
     res.set_content(e.what(), "text/plain");
   }
+}
+
+// ✅ НОВЫЙ HANDLER ДЛЯ ПОИСКА
+void Handlers::searchPostsHandler(const httplib::Request &req, httplib::Response &res) {
+    try {
+        std::string query = req.get_param_value("q");
+        if (query.empty()) {
+            res.status = 400;
+            res.set_content("Query parameter 'q' is required", "text/plain");
+            return;
+        }
+
+        int limit = 20;
+        if (req.has_param("limit")) {
+            limit = std::stoi(req.get_param_value("limit"));
+        }
+
+        // Кэшируем результаты поиска
+        std::string cache_key = "search:" + query + ":" + std::to_string(limit);
+        auto cached = cache_.get(cache_key);
+        if (cached) {
+            res.set_content(*cached, "application/json");
+            return;
+        }
+
+        // Ищем в MongoDB
+        auto results = mongo_.searchPosts(query, limit);
+        
+        // Формируем ответ
+        json response;
+        response["query"] = query;
+        response["results"] = json::array();
+        
+        for (const auto& result : results) {
+            json item;
+            item["id"] = result.id;
+            item["title"] = result.title;
+            item["preview"] = result.preview;
+            item["relevance"] = result.relevance;
+            item["matched_tags"] = result.matched_tags;
+            response["results"].push_back(item);
+        }
+
+        std::string response_str = response.dump(2);
+        res.set_content(response_str, "application/json");
+        cache_.setex(cache_key, 300, response_str); // Кэш на 5 минут
+        
+    } catch (const std::exception &e) {
+        res.status = 500;
+        res.set_content(std::string("Search error: ") + e.what(), "text/plain");
+    }
+}
+
+// ✅ НОВЫЙ HANDLER ДЛЯ ПОХОЖИХ ПОСТОВ
+void Handlers::similarPostsHandler(const httplib::Request &req, httplib::Response &res) {
+    try {
+        int post_id = std::stoi(req.matches[1].str());
+        
+        std::string cache_key = "similar:" + std::to_string(post_id);
+        auto cached = cache_.get(cache_key);
+        if (cached) {
+            res.set_content(*cached, "application/json");
+            return;
+        }
+
+        auto similar_ids = mongo_.getSimilarPosts(post_id, 5);
+        
+        // Догружаем полные данные постов из PostgreSQL
+        json response = json::array();
+        for (int similar_id : similar_ids) {
+            auto pconn = pool_.acquire(true);
+            pqxx::work txn(*pconn.conn);
+            
+            std::string sql_query = "SELECT * FROM posts WHERE post_id = $1";
+            pqxx::result r = txn.exec_params(sql_query, similar_id);
+            
+            for (const auto &row : r) {
+                json obj;
+                for (const auto &field : row) {
+                    if (field.is_null())
+                        obj[field.name()] = nullptr;
+                    else
+                        obj[field.name()] = field.c_str();
+                }
+                response.push_back(obj);
+            }
+        }
+
+        std::string response_str = response.dump(2);
+        res.set_content(response_str, "application/json");
+        cache_.setex(cache_key, 600, response_str);
+        
+    } catch (const std::exception &e) {
+        res.status = 500;
+        res.set_content(std::string("Similar posts error: ") + e.what(), "text/plain");
+    }
+}
+
+// ✅ НОВЫЙ HANDLER ДЛЯ ДАШБОРДА
+void Handlers::dashboardHandler(const httplib::Request &req, httplib::Response &res) {
+    try {
+        auto cached = cache_.get("cache:dashboard");
+        if (cached) {
+            res.set_content(*cached, "application/json");
+            return;
+        }
+
+        auto stats = mongo_.getDashboardStats();
+        std::string stats_str = stats.dump(2);
+        
+        res.set_content(stats_str, "application/json");
+        cache_.setex("cache:dashboard", 60, stats_str);
+        
+    } catch (const std::exception &e) {
+        res.status = 500;
+        res.set_content(std::string("Analytics error: ") + e.what(), "text/plain");
+    }
 }

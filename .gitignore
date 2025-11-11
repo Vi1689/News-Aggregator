@@ -1,7 +1,9 @@
 main
 
+*.gz
+*.log
+
 !/**/
-*.*
 !Makefile
 !Dockerfile
 !.gitignore

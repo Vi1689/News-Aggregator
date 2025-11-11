@@ -1,17 +1,19 @@
 #pragma once
 #include "../PgPool/PgPool.h"
 #include "../utils/CacheManager.h"
+#include "../mongo/MongoManager.h" 
 #include <httplib.h>
 
 class Handlers {
 public:
-  Handlers(PgPool &pool, CacheManager &cache);
+  Handlers(PgPool &pool, CacheManager &cache, MongoManager &mongo);
 
   void setupRoutes(httplib::Server &svr);
 
 private:
   PgPool &pool_;
   CacheManager &cache_;
+  MongoManager &mongo_;
 
   // Методы-обработчики
   void createHandler(const httplib::Request &req, httplib::Response &res);
@@ -23,4 +25,9 @@ private:
   // Вспомогательные методы
   void handlePostTags(const httplib::Request &req, httplib::Response &res,
                       bool isDelete = false);
+
+  void searchPostsHandler(const httplib::Request &req, httplib::Response &res);
+  void dashboardHandler(const httplib::Request &req, httplib::Response &res);
+  void similarPostsHandler(const httplib::Request &req, httplib::Response &res);
+
 };

@@ -11,6 +11,8 @@ RUN apt-get update && apt-get install -y \
     curl \
     libhiredis-dev \
     libssl-dev \
+    libmongocxx-dev \
+    libbsoncxx-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Сборка и установка Redis++

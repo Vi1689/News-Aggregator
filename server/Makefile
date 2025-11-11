@@ -6,6 +6,7 @@ SRC = src/models/Constants.cpp \
       src/utils/CacheManager.cpp \
       src/PgPool/PgPool.cpp \
       src/handlers/handlers.cpp \
+      src/mongo/MongoManager.cpp \
       src/main.cpp
       
 OBJ = $(SRC:.cpp=.o)

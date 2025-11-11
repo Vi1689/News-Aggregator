@@ -51,6 +51,28 @@ services:
       retries: 10
       start_period: 30s
 
+  mongodb:
+    image: mongo:7
+    container_name: mongodb
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: mongopass
+      MONGO_INITDB_DATABASE: news_aggregator
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+      - ./db/init-mongo.js:/docker-entrypoint-initdb.d/init-mongo.js:ro
+    command: 
+      - --auth
+      - --bind_ip_all
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/news_aggregator --quiet
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+
   redis:
     image: redis:7
     ports:
@@ -72,11 +94,14 @@ services:
         condition: service_healthy
       db-replica:
         condition: service_healthy
+      mongodb:
+        condition: service_healthy
     environment:
-      - WAIT_HOSTS=db-master:5432,db-replica:5432,redis:6379
+      - WAIT_HOSTS=db-master:5432,db-replica:5432,redis:6379,mongodb:27017 
       - WAIT_HOSTS_TIMEOUT=300
       - WAIT_SLEEP_INTERVAL=5
       - WAIT_HOST_CONNECT_TIMEOUT=30
+      - MONGODB_URI=mongodb://admin:mongopass@mongodb:27017/news_aggregator?authSource=admin
     ports:
       - "8080:8080"
 
@@ -112,3 +137,4 @@ services:
 volumes:
   postgres_master_data:
   postgres_replica_data:
+  mongodb_data:
