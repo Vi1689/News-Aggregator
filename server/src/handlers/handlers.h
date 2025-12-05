@@ -1,7 +1,7 @@
 #pragma once
 #include "../PgPool/PgPool.h"
+#include "../mongo/MongoManager.h"
 #include "../utils/CacheManager.h"
-#include "../mongo/MongoManager.h" 
 #include <httplib.h>
 
 class Handlers {
@@ -26,8 +26,17 @@ private:
   void handlePostTags(const httplib::Request &req, httplib::Response &res,
                       bool isDelete = false);
 
-  void searchPostsHandler(const httplib::Request &req, httplib::Response &res);
-  void dashboardHandler(const httplib::Request &req, httplib::Response &res);
-  void similarPostsHandler(const httplib::Request &req, httplib::Response &res);
-
+  void advancedSearchHandler(const httplib::Request &req,
+                             httplib::Response &res);
+  void topTagsHandler(const httplib::Request &req, httplib::Response &res);
+  void engagementAnalysisHandler(const httplib::Request &req,
+                                 httplib::Response &res);
+  void userHistoryHandler(const httplib::Request &req, httplib::Response &res);
+  void topPostsViewHandler(const httplib::Request &req, httplib::Response &res);
+  void postOperationsHandler(const httplib::Request &req,
+                             httplib::Response &res);
+  void channelPerformanceHandler(const httplib::Request &req,
+                                 httplib::Response &res);
+  void materializeViewHandler(const httplib::Request &req,
+                              httplib::Response &res);
 };

@@ -101,7 +101,7 @@ services:
       - WAIT_HOSTS_TIMEOUT=300
       - WAIT_SLEEP_INTERVAL=5
       - WAIT_HOST_CONNECT_TIMEOUT=30
-      - MONGODB_URI=mongodb://admin:mongopass@mongodb:27017/news_aggregator?authSource=admin
+      - MONGODB_URI=mongodb://news_app:app_password@mongodb:27017/news_aggregator?authSource=news_aggregator
     ports:
       - "8080:8080"
 

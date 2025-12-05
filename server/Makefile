@@ -1,6 +1,7 @@
 CXX = g++
-CXXFLAGS = -std=c++17 -I./cpp-httplib -Isrc -Wall -O2 -Isrc
-LDFLAGS = -lpqxx -lpq -pthread -lhiredis -lredis++
+INCLUDES = -I./cpp-httplib -Isrc -I/usr/local/include -I/usr/local/include/mongocxx/v_noabi -I/usr/local/include/bsoncxx/v_noabi
+CXXFLAGS = -std=c++17 -Wall -O2
+LDFLAGS = -lpqxx -lpq -pthread -lredis++ -lhiredis -lmongocxx -lbsoncxx -lmongoc-1.0 -lbson-1.0
 
 SRC = src/models/Constants.cpp \
       src/utils/CacheManager.cpp \
@@ -18,7 +19,7 @@ $(TARGET): $(OBJ)
 	$(CXX) $(OBJ) -o $(TARGET) $(LDFLAGS)
 
 %.o: %.cpp
-	$(CXX) $(CXXFLAGS) -c $< -o $@
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 
 clean:
 	rm -f $(OBJ) $(TARGET)
