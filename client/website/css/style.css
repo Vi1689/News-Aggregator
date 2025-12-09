@@ -903,3 +903,50 @@ mark {
         flex-direction: column;
     }
 }
+
+/* Темная тема */
+[data-theme="dark"] {
+    --primary: #6d28d9;
+    --secondary: #8b5cf6;
+    --accent: #a78bfa;
+    --light: #1e293b;
+    --dark: #f1f5f9;
+    --gray: #94a3b8;
+    --cat-primary: #8b5cf6;
+    --cat-secondary: #6d28d9;
+}
+
+[data-theme="dark"] body {
+    background-color: #0f172a;
+    color: var(--dark);
+}
+
+[data-theme="dark"] .search-section,
+[data-theme="dark"] .news-card {
+    background-color: #1e293b;
+    color: var(--dark);
+}
+
+[data-theme="dark"] .search-input {
+    background-color: #334155;
+    border-color: #475569;
+    color: var(--dark);
+}
+
+[data-theme="dark"] .search-tag {
+    background-color: #475569;
+    color: #e2e8f0;
+}
+
+[data-theme="dark"] .modal-content {
+    background-color: #1e293b;
+    color: var(--dark);
+}
+
+[data-theme="dark"] .theme-preview.light-theme {
+    color: #1e293b;
+}
+
+[data-theme="dark"] .size-option input:checked + span {
+    background-color: #334155;
+}

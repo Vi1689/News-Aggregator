@@ -109,6 +109,16 @@ services:
       db-replica:
         condition: service_healthy
 
+  frontend:
+    build:
+      context: ./client/website
+      dockerfile: Dockerfile
+    ports:
+      - "8888:80"
+    depends_on:
+      server:
+        condition: service_started
+
 volumes:
   postgres_master_data:
   postgres_replica_data:

@@ -1,88 +1,6 @@
-document.addEventListener('DOMContentLoaded', function() {
-    //новостей (те же самые, что и на главной странице)
-    const newsData = [
-        {
-            id: 1,
-            title: "Технологии будущего: что нас ждет в 2024 году",
-            excerpt: "Ученые прогнозируют прорыв в области искусственного интеллекта и квантовых вычислений в наступающем году...",
-            image: "https://picsum.photos/600/400?random=1",
-            date: "15 ноября 2023",
-            category: "technology",
-            tags: ["технологии", "искусственный интеллект", "будущее", "инновации"],
-            likes: 0
-        },
-        {
-            id: 2,
-            title: "Климатические изменения: новые данные",
-            excerpt: "Международная группа исследователей опубликовала отчет о темпах глобального потепления за последнее десятилетие...",
-            image: "https://picsum.photos/600/400?random=2",
-            date: "14 ноября 2023",
-            category: "science",
-            tags: ["климат", "наука", "экология", "глобальное потепление"],
-            likes: 0
-        },
-        {
-            id: 3,
-            title: "Искусство в цифровую эпоху: новые тенденции",
-            excerpt: "Цифровые художники и NFT продолжают менять представление о современном искусстве и его ценности...",
-            image: "https://picsum.photos/600/400?random=3",
-            date: "13 ноября 2023",
-            category: "culture",
-            tags: ["искусство", "цифровое искусство", "nft", "культура"],
-            likes: 0
-        },
-        {
-            id: 4,
-            title: "Новый прорыв в квантовых компьютерах",
-            excerpt: "Компания IBM анонсировала новый квантовый процессор с рекордным количеством кубитов...",
-            image: "https://picsum.photos/600/400?random=4",
-            date: "12 ноября 2023",
-            category: "technology",
-            tags: ["квантовые компьютеры", "ibm", "технологии", "инновации"],
-            likes: 0
-        },
-        {
-            id: 5,
-            title: "Открытие новой экзопланеты в зоне обитаемости",
-            excerpt: "Астрономы обнаружили планету, которая может поддерживать условия для существования жизни...",
-            image: "https://picsum.photos/600/400?random=5",
-            date: "11 ноября 2023",
-            category: "science",
-            tags: ["астрономия", "экзопланеты", "космос", "наука"],
-            likes: 0
-        },
-        {
-            id: 6,
-            title: "Фестиваль современного искусства в Венеции",
-            excerpt: "Венецианская биеннале представляет новые работы художников со всего мира...",
-            image: "https://picsum.photos/600/400?random=6",
-            date: "10 ноября 2023",
-            category: "culture",
-            tags: ["фестиваль", "венеция", "современное искусство", "культура"],
-            likes: 0
-        },
-        {
-            id: 7,
-            title: "Искусственный интеллект в медицине: революционный подход",
-            excerpt: "Новые алгоритмы ИИ помогают диагностировать заболевания с невероятной точностью...",
-            image: "https://picsum.photos/600/400?random=7",
-            date: "9 ноября 2023",
-            category: "technology",
-            tags: ["искусственный интеллект", "медицина", "здравоохранение", "технологии"],
-            likes: 0
-        },
-        {
-            id: 8,
-            title: "Исследование океанских глубин: новые открытия",
-            excerpt: "Ученые обнаружили неизвестные виды морских организмов в Марианской впадине...",
-            image: "https://picsum.photos/600/400?random=8",
-            date: "8 ноября 2023",
-            category: "science",
-            tags: ["океан", "исследования", "биология", "наука"],
-            likes: 0
-        }
-    ];
-
+[file name]: client/website/js/search-results.js
+[file content begin]
+document.addEventListener('DOMContentLoaded', async function() {
     const searchInput = document.getElementById('search-input');
     const searchButton = document.getElementById('search-btn');
     const resultsContainer = document.getElementById('search-results-container');
@@ -90,35 +8,38 @@ document.addEventListener('DOMContentLoaded', function() {
     const noResults = document.getElementById('no-results');
     const filterButtons = document.querySelectorAll('.filter-btn');
     let currentFilter = 'all';
-    let currentSearchTerm = '';
+    let searchResults = [];
 
-    function init() {
+    async function init() {
         const searchQuery = localStorage.getItem('searchQuery');
         
         if (searchQuery) {
             searchInput.value = searchQuery;
-            performSearch(searchQuery);
+            await performSearch(searchQuery);
         } else {
             window.location.href = 'index.html';
         }
 
         setupEventListeners();
-        loadLikesFromStorage();
     }
 
-    function performSearch(searchTerm) {
-        currentSearchTerm = searchTerm.toLowerCase();
-        const searchResults = newsData.filter(item => {
-            const inTags = item.tags.some(tag => 
-                tag.toLowerCase().includes(currentSearchTerm)
-            );
-            const inTitle = item.title.toLowerCase().includes(currentSearchTerm);
-            const inExcerpt = item.excerpt.toLowerCase().includes(currentSearchTerm);
-            
-            return inTags || inTitle || inExcerpt;
-        });
+    async function performSearch(searchTerm) {
+        try {
+            // Показываем индикатор загрузки
+            searchButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Поиск...';
+            searchButton.disabled = true;
+            resultsContainer.innerHTML = '<div class="loading"><i class="fas fa-spinner fa-spin"></i> Поиск...</div>';
 
-        displaySearchResults(searchResults, searchTerm);
+            searchResults = await window.BongoNewsAPI.searchPosts(searchTerm, currentFilter);
+            displaySearchResults(searchResults, searchTerm);
+            
+        } catch (error) {
+            console.error('Search failed:', error);
+            displaySearchResults([], searchTerm);
+        } finally {
+            searchButton.innerHTML = '<i class="fas fa-search"></i> Найти';
+            searchButton.disabled = false;
+        }
     }
 
     function displaySearchResults(results, searchTerm) {
@@ -145,21 +66,22 @@ document.addEventListener('DOMContentLoaded', function() {
             newsCard.dataset.category = item.category;
             newsCard.dataset.id = item.id;
 
-            const likes = item.likes || 0;
+            const likes = getPostLikes(item.id);
             const liked = getLikedPosts().includes(item.id);
+            const searchTerm = searchInput.value.toLowerCase();
 
             const highlightedTags = item.tags.map(tag => {
-                if (tag.toLowerCase().includes(currentSearchTerm)) {
+                if (tag.toLowerCase().includes(searchTerm)) {
                     return `<span class="news-tag highlighted">${tag}</span>`;
                 }
                 return `<span class="news-tag">${tag}</span>`;
             }).join('');
 
             newsCard.innerHTML = `
-                <img src="${item.image}" alt="${item.title}" class="news-image">
+                <img src="${item.image}" alt="${item.title}" class="news-image" loading="lazy">
                 <div class="news-content">
-                    <h2 class="news-title">${highlightTitle(item.title, currentSearchTerm)}</h2>
-                    <p class="news-excerpt">${highlightText(item.excerpt, currentSearchTerm)}</p>
+                    <h2 class="news-title">${highlightTitle(item.title, searchTerm)}</h2>
+                    <p class="news-excerpt">${highlightText(item.excerpt, searchTerm)}</p>
                     <div class="news-tags">
                         ${highlightedTags}
                     </div>
@@ -180,9 +102,19 @@ document.addEventListener('DOMContentLoaded', function() {
             resultsContainer.appendChild(newsCard);
         });
 
-        document.querySelectorAll('.heart-btn').forEach(btn => {
-            btn.addEventListener('click', function() {
+        // Обработчики лайков
+        resultsContainer.querySelectorAll('.heart-btn').forEach(btn => {
+            btn.addEventListener('click', function(e) {
+                e.stopPropagation();
                 likePost(this);
+            });
+        });
+
+        // Обработчики кликов по карточкам
+        resultsContainer.querySelectorAll('.news-card').forEach(card => {
+            card.addEventListener('click', function() {
+                const postId = this.dataset.id;
+                console.log('Post clicked:', postId);
             });
         });
     }
@@ -242,42 +174,43 @@ document.addEventListener('DOMContentLoaded', function() {
         const searchQuery = localStorage.getItem('searchQuery');
         if (!searchQuery) return;
 
-        let filteredResults = newsData.filter(item => {
-            const matchesSearch = item.tags.some(tag => 
-                tag.toLowerCase().includes(searchQuery.toLowerCase())
-            ) || item.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-              item.excerpt.toLowerCase().includes(searchQuery.toLowerCase());
-
-            if (currentFilter === 'all') {
-                return matchesSearch;
-            } else {
-                return matchesSearch && item.category === currentFilter;
-            }
-        });
-
-        displaySearchResults(filteredResults, searchQuery);
+        if (currentFilter === 'all') {
+            renderNews(searchResults);
+        } else {
+            const filteredResults = searchResults.filter(item => item.category === currentFilter);
+            renderNews(filteredResults);
+        }
     }
 
-    function likePost(button) {
+    async function likePost(button) {
         const newsCard = button.closest('.news-card');
         const likeCount = button.nextElementSibling;
         const newsId = parseInt(newsCard.dataset.id);
+        
+        let likedPosts = getLikedPosts();
         let currentCount = parseInt(likeCount.textContent);
 
-        let likedPosts = getLikedPosts();
         if (button.classList.contains('liked')) {
             button.classList.remove('liked');
-            likeCount.textContent = currentCount = Math.max(0, currentCount - 1);
-            updateLikesInData(newsId, currentCount);
+            likeCount.textContent = Math.max(0, currentCount - 1);
+            updateLikesInData(newsId, currentCount - 1);
             likedPosts = likedPosts.filter(id => id !== newsId);
         } else {
             button.classList.add('liked');
-            likeCount.textContent = currentCount = currentCount + 1;
-            updateLikesInData(newsId, currentCount);
+            likeCount.textContent = currentCount + 1;
+            updateLikesInData(newsId, currentCount + 1);
             likedPosts.push(newsId);
             animateBongoCat();
+            
+            const success = await window.BongoNewsAPI.likePost(newsId);
+            if (!success) {
+                button.classList.remove('liked');
+                likeCount.textContent = currentCount;
+                updateLikesInData(newsId, currentCount);
+                likedPosts = likedPosts.filter(id => id !== newsId);
+            }
         }
-        saveLikesToStorage();
+        
         saveLikedPosts(likedPosts);
     }
 
@@ -289,9 +222,15 @@ document.addEventListener('DOMContentLoaded', function() {
         localStorage.setItem('likedPosts', JSON.stringify(ids));
     }
 
+    function getPostLikes(postId) {
+        const likesData = JSON.parse(localStorage.getItem('newsLikes') || '{}');
+        return likesData[postId] || 0;
+    }
+
     function updateLikesInData(id, likes) {
-        const newsItem = newsData.find(item => item.id === id);
-        if (newsItem) newsItem.likes = likes;
+        const likesData = JSON.parse(localStorage.getItem('newsLikes') || '{}');
+        likesData[id] = likes;
+        localStorage.setItem('newsLikes', JSON.stringify(likesData));
     }
 
     function animateBongoCat() {
@@ -299,22 +238,6 @@ document.addEventListener('DOMContentLoaded', function() {
         if (bubble) {
             bubble.classList.add('show');
             setTimeout(() => bubble.classList.remove('show'), 1500);
-        }
-    }
-
-    function saveLikesToStorage() {
-        const likesData = {};
-        newsData.forEach(item => { likesData[item.id] = item.likes; });
-        localStorage.setItem('newsLikes', JSON.stringify(likesData));
-    }
-
-    function loadLikesFromStorage() {
-        const likesData = JSON.parse(localStorage.getItem('newsLikes'));
-        if (likesData) {
-            newsData.forEach(item => {
-                if (likesData[item.id] !== undefined)
-                    item.likes = likesData[item.id];
-            });
         }
     }
 
@@ -327,5 +250,6 @@ document.addEventListener('DOMContentLoaded', function() {
         return categories[category] || category;
     }
 
-    init();
+    await init();
 });
+[file content end]
