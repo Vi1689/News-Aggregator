@@ -1,5 +1,3 @@
-[file name]: client/website/js/api-client.js
-[file content begin]
 // API клиент для взаимодействия с C++ бэкендом BongoNews
 class BongoNewsAPI {
     constructor() {
@@ -572,4 +570,3 @@ document.addEventListener('DOMContentLoaded', function() {
         console.log(`Есть ${pendingLikes.length} лайков для синхронизации`);
     }
 });
-[file content end]

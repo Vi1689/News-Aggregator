@@ -1,5 +1,4 @@
-[file name]: client/website/js/app.js
-[file content begin]
+
 document.addEventListener('DOMContentLoaded', async function() {
     const newsContainer = document.getElementById('news-container');
     const recentContainer = document.getElementById('recent-container');
@@ -519,4 +518,3 @@ document.addEventListener('DOMContentLoaded', async function() {
     // Запускаем инициализацию
     await init();
 });
-[file content end]
