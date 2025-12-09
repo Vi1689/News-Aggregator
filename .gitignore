@@ -9,3 +9,5 @@ main
 
 !client/website/
 !client/website/**/*
+
+!researchers/reddit/**/*
