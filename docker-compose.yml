@@ -114,7 +114,7 @@ services:
       context: ./client/website
       dockerfile: Dockerfile
     ports:
-      - "8888:80"
+      - "8888:8888"
     depends_on:
       server:
         condition: service_started
