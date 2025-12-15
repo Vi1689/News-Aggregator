@@ -211,33 +211,51 @@ func postRequest(endpoint string, data map[string]interface{}, fieldName string)
 		return 0, fmt.Errorf("failed to read response body: %v", err)
 	}
 
-	if bodyBytes[0] != '{' {
+	fmt.Printf("Response body: %s\n", string(bodyBytes)) // Для отладки
+
+	// Проверяем, если тело ответа пустое
+	if len(bodyBytes) == 0 {
+		return 0, fmt.Errorf("empty response from server")
+	}
+
+	// Проверяем, если это JSON (начинается с {)
+	if bodyBytes[0] != '{' && bodyBytes[0] != '[' {
 		return 0, fmt.Errorf("error in response: %s", bodyBytes)
 	}
-	// Otherwise, it's an error
 
 	var resp_unmarshal map[string]interface{}
 	err = json.Unmarshal(bodyBytes, &resp_unmarshal)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("failed to parse JSON response: %v, body: %s", err, string(bodyBytes))
+	}
+
+	// Проверяем наличие ошибки в ответе
+	if errorMsg, ok := resp_unmarshal["error"].(string); ok && errorMsg != "" {
+		return 0, fmt.Errorf("server error: %s", errorMsg)
 	}
 
 	fieldValue, exists := resp_unmarshal[fieldName]
 	if !exists {
-		return 0, fmt.Errorf("there is no field %s in response", fieldName)
+		return 0, fmt.Errorf("there is no field %s in response: %v", fieldName, resp_unmarshal)
 	}
 
-	strValue, ok := fieldValue.(string)
-	if !ok {
-		return 0, fmt.Errorf("field '%s' is not a string (got %T)", fieldName, fieldValue)
+	// Обрабатываем разные типы данных
+	var id int
+	switch v := fieldValue.(type) {
+	case string:
+		id, err = strconv.Atoi(v)
+		if err != nil {
+			return 0, fmt.Errorf("failed to convert string to int: %v", err)
+		}
+	case float64:
+		id = int(v)
+	case int:
+		id = v
+	default:
+		return 0, fmt.Errorf("field '%s' has unsupported type %T", fieldName, fieldValue)
 	}
 
-	sourceId, err := strconv.Atoi(strValue)
-	if err != nil {
-		return 0, err
-	}
-
-	return sourceId, nil
+	return id, nil
 }
 
 // Вспомогательная функция для извлечения тегов из текста (#tag)
