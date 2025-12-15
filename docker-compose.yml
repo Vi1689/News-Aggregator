@@ -286,5 +286,3 @@ volumes:
   mongodb_secondary1_data:
   mongodb_secondary2_data:
   # репликация -------------------
-
-
