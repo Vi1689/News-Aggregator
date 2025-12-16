@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<!--Этот файл содержит конфигурацию для researchers. Этот файл обновляет сервер.-->
+
+<config>
+    <source name="Reddit"> 
+        <channel_limit> 5 </channel_limit> <!--Если 0, то будет по умолчанию 25. Максимум 100-->
+        <post_limit> 10 </post_limit> 
+        <comment_limit> 30 </comment_limit>
+        <media_limit> 10 </media_limit>
+        <preferred_channels></preferred_channels>
+        <research_period> 5 </research_period>
+    </source>
+
+    <source name="Vkontakte"> 
+        <channel_limit> 1 </channel_limit> 
+        <post_limit> 2 </post_limit> 
+        <comment_limit> 1 </comment_limit>
+        <media_limit> 1 </media_limit>
+        <preferred_channels></preferred_channels>
+        <research_period> 1 </research_period>
+    </source>
+</config>

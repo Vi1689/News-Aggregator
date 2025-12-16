@@ -130,6 +130,18 @@ services:
       - ./config/researchers.xml:/usr/local/etc/vk-researcher/test_conf.xml
       - ./researchers/vk/access_token:/usr/local/etc/vk-researcher/access_token
     restart: unless-stopped
+
+  researcher-reddit:
+    build:
+      context: .
+      dockerfile: ./researchers/reddit/Dockerfile
+    depends_on:
+      server:
+        condition: service_started
+    volumes:
+      - ./config/researchers.xml:/usr/local/etc/reddit-researcher/test_conf.xml
+      - ./researchers/reddit/access_data:/usr/local/etc/reddit-researcher/access_data
+      - ./researchers/reddit/token_cache.json:/usr/local/etc/reddit-researcher/token_cache.json
   
   # Backup сервис
   backup:
@@ -165,3 +177,4 @@ networks:
   default:
     name: news-aggregator-network
     driver: bridge
+  postgres_replica_data:
