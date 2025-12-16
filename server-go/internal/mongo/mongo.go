@@ -396,8 +396,6 @@ func (m *MongoManager) GetChannelPerformance(ctx context.Context) ([]map[string]
 	return results, nil
 }
 
-// ============ ПОЛЬЗОВАТЕЛЬСКИЕ ВЗАИМОДЕЙСТВИЯ ============
-
 func (m *MongoManager) RecordUserInteraction(ctx context.Context, userID string, postID int, action string) error {
 	interactions := m.db.Collection("user_interactions")
 
