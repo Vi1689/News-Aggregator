@@ -1,6 +1,7 @@
 #include "PgPool/PgPool.h"
 #include "handlers/handlers.h"
 #include "models/Constants.h"
+#include "mongo/MongoManager.h"
 #include "utils/CacheManager.h"
 #include <chrono>
 #include <httplib.h>
@@ -13,7 +14,8 @@ int main() {
   // Инициализация компонентов
   PgPool pool(constants::CONN_STRINGS, constants::POOL_SIZE);
   CacheManager cache;
-  Handlers handlers(pool, cache);
+  MongoManager mongo;
+  Handlers handlers(pool, cache, mongo);
 
   // Настройка маршрутов
   handlers.setupRoutes(svr);

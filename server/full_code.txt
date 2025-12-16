@@ -1,0 +1,2319 @@
+/media/vitalii/medio/study/News-Aggregator/server/./Dockerfile:
+# Используем официальный образ Ubuntu
+FROM ubuntu:20.04
+
+# Отключаем интерактивные запросы при установке пакетов
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Устанавливаем базовые зависимости
+RUN apt-get update && apt-get install -y \
+    cmake make git curl wget \
+    build-essential pkg-config \
+    libpqxx-dev libpq-dev \
+    nlohmann-json3-dev \
+    libhiredis-dev libssl-dev \
+    libsasl2-dev libsasl2-modules \
+    libboost-system-dev libboost-filesystem-dev \
+    libboost-thread-dev libboost-iostreams-dev \
+    python3 python3-pip \
+    zlib1g-dev libzstd-dev libsnappy-dev \
+ && rm -rf /var/lib/apt/lists/*
+
+# Устанавливаем более новую версию CMake (для MongoDB)
+RUN wget https://github.com/Kitware/CMake/releases/download/v3.25.0/cmake-3.25.0-linux-x86_64.sh && \
+    chmod +x cmake-3.25.0-linux-x86_64.sh && \
+    ./cmake-3.25.0-linux-x86_64.sh --skip-license --prefix=/usr/local && \
+    rm cmake-3.25.0-linux-x86_64.sh
+
+# Устанавливаем MongoDB C Driver
+RUN git clone https://github.com/mongodb/mongo-c-driver.git /tmp/mongo-c-driver && \
+    cd /tmp/mongo-c-driver && \
+    git checkout 1.24.4 && \
+    mkdir -p cmake-build && cd cmake-build && \
+    cmake \
+      -DENABLE_AUTOMATIC_INIT_AND_CLEANUP=OFF \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_INSTALL_PREFIX=/usr/local \
+      .. && \
+    make -j$(nproc) && \
+    make install && \
+    ldconfig && \
+    rm -rf /tmp/mongo-c-driver
+
+# Устанавливаем MongoDB C++ Driver
+RUN git clone https://github.com/mongodb/mongo-cxx-driver.git /tmp/mongo-cxx-driver && \
+    cd /tmp/mongo-cxx-driver && \
+    git checkout r3.10.1 && \
+    mkdir -p build && cd build && \
+    cmake \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_INSTALL_PREFIX=/usr/local \
+      -DCMAKE_CXX_STANDARD=17 \
+      -DBSONCXX_POLY_USE_BOOST=1 \
+      -DMONGOCXX_ENABLE_SLOW_TESTS=OFF \
+      .. && \
+    make -j$(nproc) && \
+    make install && \
+    ldconfig && \
+    rm -rf /tmp/mongo-cxx-driver
+
+# Устанавливаем Redis++
+RUN git clone https://github.com/sewenew/redis-plus-plus.git /tmp/redis-plus-plus && \
+    cd /tmp/redis-plus-plus && \
+    mkdir build && cd build && \
+    cmake \
+      -DREDIS_PLUS_PLUS_BUILD_TEST=OFF \
+      -DCMAKE_BUILD_TYPE=Release \
+      .. && \
+    make -j$(nproc) && \
+    make install && \
+    ldconfig && \
+    rm -rf /tmp/redis-plus-plus
+
+# Клонируем cpp-httplib
+RUN git clone https://github.com/yhirose/cpp-httplib.git /tmp/cpp-httplib
+
+# Создаем рабочую директорию
+WORKDIR /app
+
+# Копируем исходники
+COPY ./server/Makefile .
+COPY ./server/src ./src
+
+# Собираем сервер
+RUN make
+
+# Открываем порт
+EXPOSE 8080
+
+# Запускаем сервер
+CMD ["./server"]
+
+/media/vitalii/medio/study/News-Aggregator/server/./src/handlers/handlers.h:
+#pragma once
+#include "../PgPool/PgPool.h"
+#include "../mongo/MongoManager.h"
+#include "../utils/CacheManager.h"
+#include <httplib.h>
+
+class Handlers {
+public:
+  Handlers(PgPool &pool, CacheManager &cache, MongoManager &mongo);
+
+  void setupRoutes(httplib::Server &svr);
+
+private:
+  PgPool &pool_;
+  CacheManager &cache_;
+  MongoManager &mongo_;
+
+  // Методы-обработчики
+  void createHandler(const httplib::Request &req, httplib::Response &res);
+  void readAllHandler(const httplib::Request &req, httplib::Response &res);
+  void readOneHandler(const httplib::Request &req, httplib::Response &res);
+  void updateHandler(const httplib::Request &req, httplib::Response &res);
+  void deleteHandler(const httplib::Request &req, httplib::Response &res);
+
+  // Вспомогательные методы
+  void handlePostTags(const httplib::Request &req, httplib::Response &res,
+                      bool isDelete = false);
+
+  void advancedSearchHandler(const httplib::Request &req,
+                             httplib::Response &res);
+  void topTagsHandler(const httplib::Request &req, httplib::Response &res);
+  void engagementAnalysisHandler(const httplib::Request &req,
+                                 httplib::Response &res);
+  void userHistoryHandler(const httplib::Request &req, httplib::Response &res);
+  void topPostsViewHandler(const httplib::Request &req, httplib::Response &res);
+  void postOperationsHandler(const httplib::Request &req,
+                             httplib::Response &res);
+  void channelPerformanceHandler(const httplib::Request &req,
+                                 httplib::Response &res);
+  void materializeViewHandler(const httplib::Request &req,
+                              httplib::Response &res);
+};
+
+/media/vitalii/medio/study/News-Aggregator/server/./src/handlers/handlers.cpp:
+#include "handlers.h"
+#include "../models/Constants.h"
+#include <iostream>
+#include <nlohmann/json.hpp>
+#include <pqxx/pqxx>
+
+using json = nlohmann::json;
+
+Handlers::Handlers(PgPool &pool, CacheManager &cache, MongoManager &mongo)
+    : pool_(pool), cache_(cache), mongo_(mongo) {}
+
+void Handlers::setupRoutes(httplib::Server &svr) {
+  // ДОБАВЛЕНИЕ ЗАПИСИ
+  svr.Post(R"(/api/([A-Za-z_]+))",
+           [this](const httplib::Request &req, httplib::Response &res) {
+             this->createHandler(req, res);
+           });
+
+  // ПОЛУЧЕНИЕ ВСЕХ ЗАПИСЕЙ
+  svr.Get(R"(/api/([A-Za-z_]+))",
+          [this](const httplib::Request &req, httplib::Response &res) {
+            this->readAllHandler(req, res);
+          });
+
+  // ПОЛУЧЕНИЕ ОДНОЙ ЗАПИСИ
+  svr.Get(R"(/api/([A-Za-z_]+)/([0-9]+)(?:/([0-9]+))?)",
+          [this](const httplib::Request &req, httplib::Response &res) {
+            this->readOneHandler(req, res);
+          });
+
+  // ОБНОВЛЕНИЕ ЗАПИСИ
+  svr.Put(R"(/api/([A-Za-z_]+)/([0-9]+)(?:/([0-9]+))?)",
+          [this](const httplib::Request &req, httplib::Response &res) {
+            this->updateHandler(req, res);
+          });
+
+  // УДАЛЕНИЕ ЗАПИСИ
+  svr.Delete(R"(/api/([A-Za-z_]+)/([0-9]+)(?:/([0-9]+))?)",
+             [this](const httplib::Request &req, httplib::Response &res) {
+               this->deleteHandler(req, res);
+             });
+
+  // 1. Расширенный поиск с фильтрами ($and, $or, $in, $nin, $gte, $lte)
+  svr.Post("/api/mongo/search/advanced",
+           [this](const httplib::Request &req, httplib::Response &res) {
+             this->advancedSearchHandler(req, res);
+           });
+
+  // 2. Получить топ тегов (aggregation с $unwind, $group, $sort, $limit)
+  svr.Get("/api/mongo/analytics/top-tags",
+          [this](const httplib::Request &req, httplib::Response &res) {
+            this->topTagsHandler(req, res);
+          });
+
+  // 3. Анализ вовлеченности (aggregation с $match, $project, $group)
+  svr.Get("/api/mongo/analytics/engagement",
+          [this](const httplib::Request &req, httplib::Response &res) {
+            this->engagementAnalysisHandler(req, res);
+          });
+
+  // 4. История пользователя (aggregation с $lookup)
+  svr.Get("/api/mongo/user/:user_id/history",
+          [this](const httplib::Request &req, httplib::Response &res) {
+            this->userHistoryHandler(req, res);
+          });
+
+  // 5. Топ посты из материализованного представления
+  svr.Get("/api/mongo/top-posts",
+          [this](const httplib::Request &req, httplib::Response &res) {
+            this->topPostsViewHandler(req, res);
+          });
+
+  // 6. Обновление поста с различными операторами ($set, $inc, $push, $addToSet)
+  svr.Post("/api/mongo/posts/:post_id/operations",
+           [this](const httplib::Request &req, httplib::Response &res) {
+             this->postOperationsHandler(req, res);
+           });
+
+  // 7. Производительность каналов
+  svr.Get("/api/mongo/analytics/channels",
+          [this](const httplib::Request &req, httplib::Response &res) {
+            this->channelPerformanceHandler(req, res);
+          });
+
+  // 8. Материализация витрины (триггер пересчета)
+  svr.Post("/api/mongo/materialize",
+           [this](const httplib::Request &req, httplib::Response &res) {
+             this->materializeViewHandler(req, res);
+           });
+}
+
+void Handlers::createHandler(const httplib::Request &req,
+                             httplib::Response &res) {
+  try {
+    std::string table = req.matches[1];
+    if (!constants::is_valid_table(table)) {
+      res.status = 404;
+      res.set_content("Table not found", "text/plain");
+      return;
+    }
+
+    // ПРОВЕРКА ДУБЛИКАТОВ ТОЛЬКО ДЛЯ POSTS
+    if (table == "posts") {
+      auto data = json::parse(req.body);
+
+      if (data.contains("title") && data.contains("content")) {
+        std::string title = data["title"];
+        std::string content = data["content"];
+
+        // Генерируем хеш контента
+        std::string content_hash =
+            std::to_string(std::hash<std::string>{}(title + content));
+
+        // Проверяем дубликат в MongoDB
+        if (mongo_.isDuplicateContent(content_hash)) {
+          res.status = 409;
+          res.set_content("Duplicate post detected", "text/plain");
+          return;
+        }
+      }
+    }
+
+    auto data = json::parse(req.body);
+
+    std::vector<std::string> cols;
+    std::vector<std::string> params;
+    for (auto it = data.begin(); it != data.end(); ++it) {
+      cols.push_back(it.key());
+      if (it.value().is_null())
+        params.push_back("__NULL__");
+      else if (it.value().is_string())
+        params.push_back(it.value().get<std::string>());
+      else
+        params.push_back(it.value().dump());
+    }
+    if (cols.empty()) {
+      res.status = 400;
+      res.set_content("No fields provided", "text/plain");
+      return;
+    }
+
+    std::string placeholders;
+    std::string collist;
+    for (size_t i = 0; i < cols.size(); ++i) {
+      if (i) {
+        placeholders += ",";
+        collist += ",";
+      }
+      placeholders += "$" + std::to_string(i + 1);
+      collist += cols[i];
+    }
+
+    // Для записи используем только МАСТЕР (read_only = false)
+    auto pconn = pool_.acquire(false);
+    std::cout << "Using " << (pconn.is_replica ? "REPLICA" : "MASTER")
+              << " for WRITE operation on table: " << table << std::endl;
+
+    pqxx::work txn(*pconn.conn);
+
+    std::string sql_query = "INSERT INTO " + table + " (" + collist +
+                            ") VALUES (" + placeholders + ") RETURNING *";
+
+    pqxx::params p;
+    for (const auto &param : params) {
+      if (param == "__NULL__") {
+        p.append(std::monostate{});
+      } else {
+        p.append(param);
+      }
+    }
+
+    pqxx::result r = txn.exec(sql_query, p);
+    txn.commit();
+
+    if (r.empty()) {
+      res.status = 500;
+      res.set_content("Failed to retrieve inserted item", "text/plain");
+      return;
+    }
+
+    json obj;
+    const auto &row = r[0];
+    for (const auto &field : row) {
+      if (field.is_null())
+        obj[field.name()] = nullptr;
+      else
+        obj[field.name()] = field.c_str();
+    }
+
+    // ИНДЕКСИРУЕМ НОВЫЙ POST В MONGODB
+    if (table == "posts") {
+      int post_id = row["post_id"].as<int>();
+      std::string title = data["title"];
+      std::string content = data["content"];
+
+      // Получаем теги если они есть
+      std::vector<std::string> tags;
+      if (data.contains("tags")) {
+        tags = data["tags"].get<std::vector<std::string>>();
+      }
+
+      mongo_.indexPost(post_id, title, content, tags);
+    }
+
+    cache_.del("cache:" + table);
+
+    res.set_content(obj.dump(2), "application/json");
+  } catch (const std::runtime_error &e) {
+    // Таймаут или проблемы с подключением к БД
+    res.status = 503; // Service Unavailable
+    res.set_content(std::string("Database temporarily unavailable: ") +
+                        e.what(),
+                    "text/plain");
+  } catch (const std::exception &e) {
+    res.status = 500;
+    res.set_content(std::string("Error: ") + e.what(), "text/plain");
+  }
+}
+
+void Handlers::readAllHandler(const httplib::Request &req,
+                              httplib::Response &res) {
+  try {
+    std::string table = req.matches[1];
+    if (!constants::is_valid_table(table)) {
+      res.status = 404;
+      res.set_content("Table not found", "text/plain");
+      return;
+    }
+
+    auto cache_key = "cache:" + table;
+    auto cached = cache_.get(cache_key);
+    if (cached) {
+      res.set_content(*cached, "application/json");
+      return;
+    }
+
+    // Для чтения используем РЕПЛИКУ (read_only = true)
+    auto pconn = pool_.acquire(true);
+    std::cout << "Using " << (pconn.is_replica ? "REPLICA" : "MASTER")
+              << " for READ operation on table: " << table << std::endl;
+
+    pqxx::work txn(*pconn.conn);
+
+    std::string sql_query = "SELECT * FROM " + table;
+    pqxx::result r = txn.exec(sql_query);
+
+    json arr = json::array();
+    for (const auto &row : r) {
+      json obj;
+      for (const auto &field : row) {
+        if (field.is_null())
+          obj[field.name()] = nullptr;
+        else
+          obj[field.name()] = field.c_str();
+      }
+      arr.push_back(obj);
+    }
+
+    res.set_content(arr.dump(2), "application/json");
+    cache_.setex("cache:" + table, 300, arr.dump(2)); // TTL 5 минут
+  } catch (const std::runtime_error &e) {
+    // Таймаут или проблемы с подключением к БД
+    res.status = 503; // Service Unavailable
+    res.set_content(std::string("Database temporarily unavailable: ") +
+                        e.what(),
+                    "text/plain");
+  } catch (const std::exception &e) {
+    res.status = 500;
+    res.set_content(std::string("Error: ") + e.what(), "text/plain");
+  }
+}
+
+void Handlers::readOneHandler(const httplib::Request &req,
+                              httplib::Response &res) {
+  try {
+    std::string table = req.matches[1];
+    if (!constants::is_valid_table(table)) {
+      res.status = 404;
+      res.set_content("Table not found", "text/plain");
+      return;
+    }
+
+    if (table == "post_tags") {
+      if (!req.matches[2].matched || !req.matches[3].matched) {
+        res.status = 400;
+        res.set_content("Need post_id and tag_id in path", "text/plain");
+        return;
+      }
+      std::string post_id = req.matches[2].str();
+      std::string tag_id = req.matches[3].str();
+      try {
+        std::string cache_key = "cache:post_tags:" + post_id + ":" + tag_id;
+        auto cached = cache_.get(cache_key);
+        if (cached) {
+          res.set_content(*cached, "application/json");
+          return;
+        }
+
+        // Для чтения используем РЕПЛИКУ
+        auto pconn = pool_.acquire(true);
+        pqxx::work txn(*pconn.conn);
+        std::string sql_query =
+            "SELECT * FROM " + table + " WHERE post_id=$1 AND tag_id=$2";
+        pqxx::result r = txn.exec_params(sql_query, post_id, tag_id);
+
+        json arr = json::array();
+        for (const auto &row : r) {
+          json obj;
+          for (const auto &field : row) {
+            if (field.is_null())
+              obj[field.name()] = nullptr;
+            else
+              obj[field.name()] = field.c_str();
+          }
+          arr.push_back(obj);
+        }
+
+        res.set_content(arr.dump(2), "application/json");
+        cache_.setex(cache_key, 600, arr.dump(2)); // TTL 10 минут
+      } catch (const std::runtime_error &e) {
+        res.status = 503;
+        res.set_content(std::string("Database temporarily unavailable: ") +
+                            e.what(),
+                        "text/plain");
+      } catch (const std::exception &e) {
+        res.status = 500;
+        res.set_content(e.what(), "text/plain");
+      }
+      return;
+    }
+
+    std::string id = req.matches[2].str();
+    std::string cache_key = "cache:" + table + ":" + id;
+    auto cached = cache_.get(cache_key);
+    if (cached) {
+      res.set_content(*cached, "application/json");
+      return;
+    }
+
+    auto it = constants::pk_map.find(table);
+    if (it == constants::pk_map.end()) {
+      res.status = 400;
+      res.set_content("Table has no simple PK", "text/plain");
+      return;
+    }
+    std::string pk = it->second;
+
+    // Для чтения используем РЕПЛИКУ
+    auto pconn = pool_.acquire(true);
+    pqxx::work txn(*pconn.conn);
+
+    std::string sql_query = "SELECT * FROM " + table + " WHERE " + pk + " = $1";
+    pqxx::result r = txn.exec_params(sql_query, id);
+
+    json arr = json::array();
+    for (const auto &row : r) {
+      json obj;
+      for (const auto &field : row) {
+        if (field.is_null())
+          obj[field.name()] = nullptr;
+        else
+          obj[field.name()] = field.c_str();
+      }
+      arr.push_back(obj);
+    }
+
+    res.set_content(arr.dump(2), "application/json");
+    cache_.setex("cache:" + table + ":" + id, 600, arr.dump(2)); // TTL 10 минут
+  } catch (const std::runtime_error &e) {
+    // Таймаут или проблемы с подключением к БД
+    res.status = 503; // Service Unavailable
+    res.set_content(std::string("Database temporarily unavailable: ") +
+                        e.what(),
+                    "text/plain");
+  } catch (const std::exception &e) {
+    res.status = 500;
+    res.set_content(std::string("Error: ") + e.what(), "text/plain");
+  }
+}
+
+void Handlers::updateHandler(const httplib::Request &req,
+                             httplib::Response &res) {
+  try {
+    std::string table = req.matches[1];
+    if (!constants::is_valid_table(table)) {
+      res.status = 404;
+      res.set_content("Table not found", "text/plain");
+      return;
+    }
+    std::string id = req.matches[2].str();
+
+    auto it = constants::pk_map.find(table);
+    if (it == constants::pk_map.end()) {
+      res.status = 400;
+      res.set_content("Table has no simple PK", "text/plain");
+      return;
+    }
+    std::string pk = it->second;
+
+    auto data = json::parse(req.body);
+
+    std::vector<std::string> cols;
+    std::vector<std::string> params;
+    for (auto it = data.begin(); it != data.end(); ++it) {
+      cols.push_back(it.key());
+      if (it.value().is_null())
+        params.push_back("__NULL__");
+      else if (it.value().is_string())
+        params.push_back(it.value().get<std::string>());
+      else
+        params.push_back(it.value().dump());
+    }
+
+    if (cols.empty()) {
+      res.status = 400;
+      res.set_content("No fields provided", "text/plain");
+      return;
+    }
+
+    // Для записи используем только МАСТЕР
+    auto pconn = pool_.acquire(false);
+    pqxx::work txn(*pconn.conn);
+
+    std::string set_clause;
+    for (size_t i = 0; i < cols.size(); ++i) {
+      if (i)
+        set_clause += ", ";
+      set_clause += cols[i] + " = ";
+      if (params[i] == "__NULL__")
+        set_clause += "NULL";
+      else
+        set_clause += txn.quote(params[i]);
+    }
+
+    std::string sql_query = "UPDATE " + table + " SET " + set_clause +
+                            " WHERE " + pk + " = " + txn.quote(id);
+
+    txn.exec(sql_query);
+    txn.commit();
+
+    // ОБНОВЛЯЕМ ИНДЕКС В MONGODB ДЛЯ POSTS
+    if (table == "posts") {
+      auto data = json::parse(req.body);
+
+      std::string title, content;
+      std::vector<std::string> tags;
+
+      if (data.contains("title"))
+        title = data["title"];
+      if (data.contains("content"))
+        content = data["content"];
+      if (data.contains("tags"))
+        tags = data["tags"].get<std::vector<std::string>>();
+
+      int post_id = std::stoi(id);
+      mongo_.updatePostIndex(post_id, title, content, tags);
+    }
+
+    cache_.del("cache:" + table);
+    cache_.del("cache:" + table + ":" + id);
+    res.set_content("Item updated\n", "text/plain");
+  } catch (const std::runtime_error &e) {
+    // Таймаут или проблемы с подключением к БД
+    res.status = 503; // Service Unavailable
+    res.set_content(std::string("Database temporarily unavailable: ") +
+                        e.what(),
+                    "text/plain");
+  } catch (const std::exception &e) {
+    res.status = 500;
+    res.set_content(std::string("Error: ") + e.what(), "text/plain");
+  }
+}
+
+void Handlers::deleteHandler(const httplib::Request &req,
+                             httplib::Response &res) {
+  try {
+    std::string table = req.matches[1];
+    if (!constants::is_valid_table(table)) {
+      res.status = 404;
+      res.set_content("Table not found", "text/plain");
+      return;
+    }
+
+    std::string id = req.matches[2].str();
+
+    // УДАЛЯЕМ ИЗ ИНДЕКСА MONGODB ДЛЯ POSTS
+    if (table == "posts") {
+      int post_id = std::stoi(id);
+      mongo_.removePostIndex(post_id);
+    }
+
+    if (table == "post_tags") {
+      handlePostTags(req, res, true);
+      return;
+    }
+
+    auto it = constants::pk_map.find(table);
+    if (it == constants::pk_map.end()) {
+      res.status = 400;
+      res.set_content("Table has no simple PK", "text/plain");
+      return;
+    }
+    std::string pk = it->second;
+
+    // Для записи используем только МАСТЕР
+    auto pconn = pool_.acquire(false);
+    pqxx::work txn(*pconn.conn);
+
+    std::string sql_query =
+        "DELETE FROM " + table + " WHERE " + pk + " = " + txn.quote(id);
+    txn.exec(sql_query);
+    txn.commit();
+
+    cache_.del("cache:" + table);
+    cache_.del("cache:" + table + ":" + id);
+    res.set_content("Item deleted\n", "text/plain");
+  } catch (const std::runtime_error &e) {
+    // Таймаут или проблемы с подключением к БД
+    res.status = 503; // Service Unavailable
+    res.set_content(std::string("Database temporarily unavailable: ") +
+                        e.what(),
+                    "text/plain");
+  } catch (const std::exception &e) {
+    res.status = 500;
+    res.set_content(std::string("Error: ") + e.what(), "text/plain");
+  }
+}
+
+void Handlers::handlePostTags(const httplib::Request &req,
+                              httplib::Response &res, bool isDelete) {
+  if (!req.matches[2].matched || !req.matches[3].matched) {
+    res.status = 400;
+    res.set_content("Need post_id and tag_id in path", "text/plain");
+    return;
+  }
+
+  std::string post_id = req.matches[2].str();
+  std::string tag_id = req.matches[3].str();
+
+  try {
+    // Для записи используем только МАСТЕР
+    auto pconn = pool_.acquire(false);
+    pqxx::work txn(*pconn.conn);
+
+    if (isDelete) {
+      std::string sql_query =
+          "DELETE FROM post_tags WHERE post_id=$1 AND tag_id=$2";
+      txn.exec_params(sql_query, post_id, tag_id);
+      txn.commit();
+
+      res.set_content("Item deleted\n", "text/plain");
+      cache_.del("cache:post_tags:" + post_id + ":" + tag_id);
+      cache_.del("cache:posts:" + post_id);
+    } else {
+      // Для операций чтения post_tags
+      std::string sql_query =
+          "SELECT * FROM post_tags WHERE post_id=$1 AND tag_id=$2";
+      pqxx::result r = txn.exec_params(sql_query, post_id, tag_id);
+
+      json arr = json::array();
+      for (const auto &row : r) {
+        json obj;
+        for (const auto &field : row) {
+          if (field.is_null())
+            obj[field.name()] = nullptr;
+          else
+            obj[field.name()] = field.c_str();
+        }
+        arr.push_back(obj);
+      }
+
+      res.set_content(arr.dump(2), "application/json");
+    }
+  } catch (const std::runtime_error &e) {
+    // Таймаут или проблемы с подключением к БД
+    res.status = 503; // Service Unavailable
+    res.set_content(std::string("Database temporarily unavailable: ") +
+                        e.what(),
+                    "text/plain");
+  } catch (const std::exception &e) {
+    res.status = 500;
+    res.set_content(e.what(), "text/plain");
+  }
+}
+
+// 1. Расширенный поиск с фильтрами
+void Handlers::advancedSearchHandler(const httplib::Request &req,
+                                     httplib::Response &res) {
+  try {
+    auto filters = json::parse(req.body);
+
+    std::string cache_key = "advanced_search:" + req.body;
+    auto cached = cache_.get(cache_key);
+    if (cached) {
+      res.set_content(*cached, "application/json");
+      return;
+    }
+
+    // Поиск с фильтрами: $in, $nin, $gte, $and, $or
+    auto results = mongo_.advancedSearch(filters, 20);
+
+    std::string response_str = results.dump(2);
+    res.set_content(response_str, "application/json");
+    cache_.setex(cache_key, 300, response_str);
+
+  } catch (const std::exception &e) {
+    res.status = 500;
+    res.set_content(std::string("Advanced search error: ") + e.what(),
+                    "text/plain");
+  }
+}
+
+// 2. Топ тегов с aggregation
+void Handlers::topTagsHandler(const httplib::Request &req,
+                              httplib::Response &res) {
+  try {
+    int limit = 10;
+    if (req.has_param("limit")) {
+      limit = std::stoi(req.get_param_value("limit"));
+    }
+
+    auto cached = cache_.get("cache:top_tags:" + std::to_string(limit));
+    if (cached) {
+      res.set_content(*cached, "application/json");
+      return;
+    }
+
+    // Aggregation pipeline: $unwind -> $group -> $sort -> $limit
+    auto tags = mongo_.getTopTags(limit);
+    std::string tags_str = tags.dump(2);
+
+    res.set_content(tags_str, "application/json");
+    cache_.setex("cache:top_tags:" + std::to_string(limit), 600, tags_str);
+
+  } catch (const std::exception &e) {
+    res.status = 500;
+    res.set_content(std::string("Top tags error: ") + e.what(), "text/plain");
+  }
+}
+
+// 3. Анализ вовлеченности
+void Handlers::engagementAnalysisHandler(const httplib::Request &req,
+                                         httplib::Response &res) {
+  try {
+    int days = 30;
+    if (req.has_param("days")) {
+      days = std::stoi(req.get_param_value("days"));
+    }
+
+    auto cached = cache_.get("cache:engagement:" + std::to_string(days));
+    if (cached) {
+      res.set_content(*cached, "application/json");
+      return;
+    }
+
+    // Aggregation pipeline: $match -> $project -> $group
+    auto analysis = mongo_.getPostEngagementAnalysis(days);
+    std::string analysis_str = analysis.dump(2);
+
+    res.set_content(analysis_str, "application/json");
+    cache_.setex("cache:engagement:" + std::to_string(days), 300, analysis_str);
+
+  } catch (const std::exception &e) {
+    res.status = 500;
+    res.set_content(std::string("Engagement analysis error: ") + e.what(),
+                    "text/plain");
+  }
+}
+
+// 4. История пользователя с $lookup
+void Handlers::userHistoryHandler(const httplib::Request &req,
+                                  httplib::Response &res) {
+  try {
+    std::string user_id = req.matches[1].str();
+
+    int limit = 50;
+    if (req.has_param("limit")) {
+      limit = std::stoi(req.get_param_value("limit"));
+    }
+
+    std::string cache_key =
+        "user_history:" + user_id + ":" + std::to_string(limit);
+    auto cached = cache_.get(cache_key);
+    if (cached) {
+      res.set_content(*cached, "application/json");
+      return;
+    }
+
+    // Aggregation with $lookup (N -> N join)
+    auto history = mongo_.getUserHistory(user_id, limit);
+    std::string history_str = history.dump(2);
+
+    res.set_content(history_str, "application/json");
+    cache_.setex(cache_key, 300, history_str);
+
+  } catch (const std::exception &e) {
+    res.status = 500;
+    res.set_content(std::string("User history error: ") + e.what(),
+                    "text/plain");
+  }
+}
+
+// 5. Топ посты из материализованного представления
+void Handlers::topPostsViewHandler(const httplib::Request &req,
+                                   httplib::Response &res) {
+  try {
+    int limit = 10;
+    if (req.has_param("limit")) {
+      limit = std::stoi(req.get_param_value("limit"));
+    }
+
+    auto cached = cache_.get("cache:top_posts_view:" + std::to_string(limit));
+    if (cached) {
+      res.set_content(*cached, "application/json");
+      return;
+    }
+
+    auto top_posts = mongo_.getTopPostsFromView(limit);
+    std::string response_str = top_posts.dump(2);
+
+    res.set_content(response_str, "application/json");
+    cache_.setex("cache:top_posts_view:" + std::to_string(limit), 120,
+                 response_str);
+
+  } catch (const std::exception &e) {
+    res.status = 500;
+    res.set_content(std::string("Top posts view error: ") + e.what(),
+                    "text/plain");
+  }
+}
+
+// 6. Операции над постом ($set, $inc, $push, $addToSet, $pull)
+void Handlers::postOperationsHandler(const httplib::Request &req,
+                                     httplib::Response &res) {
+  try {
+    int post_id = std::stoi(req.matches[1].str());
+    auto operations = json::parse(req.body);
+
+    std::string operation_type = operations["operation"];
+
+    if (operation_type == "increment_views") {
+      // $inc оператор
+      mongo_.incrementViewCount(post_id);
+      res.set_content(json{{"message", "Views incremented"}}.dump(),
+                      "application/json");
+
+    } else if (operation_type == "add_tag") {
+      // $addToSet оператор
+      std::string tag = operations["tag"];
+      mongo_.addTagToPost(post_id, tag);
+      res.set_content(json{{"message", "Tag added"}}.dump(),
+                      "application/json");
+
+    } else if (operation_type == "remove_tag") {
+      // $pull оператор
+      std::string tag = operations["tag"];
+      mongo_.removeTagFromPost(post_id, tag);
+      res.set_content(json{{"message", "Tag removed"}}.dump(),
+                      "application/json");
+
+    } else if (operation_type == "update_stats") {
+      // $inc для множественных полей
+      int likes_delta = operations.value("likes_delta", 0);
+      int comments_delta = operations.value("comments_delta", 0);
+      mongo_.updatePostStats(post_id, likes_delta, comments_delta);
+      res.set_content(json{{"message", "Stats updated"}}.dump(),
+                      "application/json");
+
+    } else if (operation_type == "upsert") {
+      // upsert операция
+      bool was_inserted = mongo_.upsertPost(post_id, operations["data"]);
+      res.set_content(
+          json{{"message", was_inserted ? "Post created" : "Post updated"},
+               {"was_inserted", was_inserted}}
+              .dump(),
+          "application/json");
+
+    } else {
+      res.status = 400;
+      res.set_content("Unknown operation type", "text/plain");
+      return;
+    }
+
+    // Инвалидируем кеш
+    cache_.del("cache:posts:" + std::to_string(post_id));
+
+  } catch (const std::exception &e) {
+    res.status = 500;
+    res.set_content(std::string("Operation error: ") + e.what(), "text/plain");
+  }
+}
+
+// 7. Производительность каналов
+void Handlers::channelPerformanceHandler(const httplib::Request &req,
+                                         httplib::Response &res) {
+  try {
+    auto cached = cache_.get("cache:channel_performance");
+    if (cached) {
+      res.set_content(*cached, "application/json");
+      return;
+    }
+
+    auto performance = mongo_.getChannelPerformance();
+    std::string response_str = performance.dump(2);
+
+    res.set_content(response_str, "application/json");
+    cache_.setex("cache:channel_performance", 600, response_str);
+
+  } catch (const std::exception &e) {
+    res.status = 500;
+    res.set_content(std::string("Channel performance error: ") + e.what(),
+                    "text/plain");
+  }
+}
+
+// 8. Материализация витрины
+void Handlers::materializeViewHandler(const httplib::Request &req,
+                                      httplib::Response &res) {
+  try {
+    mongo_.materializeTopPostsView();
+
+    // Инвалидируем кеш витрины
+    cache_.del("cache:top_posts_view:*");
+
+    res.set_content(
+        json{{"message", "View materialized successfully"},
+             {"timestamp",
+              std::chrono::system_clock::now().time_since_epoch().count()}}
+            .dump(),
+        "application/json");
+
+  } catch (const std::exception &e) {
+    res.status = 500;
+    res.set_content(std::string("Materialization error: ") + e.what(),
+                    "text/plain");
+  }
+}
+
+/media/vitalii/medio/study/News-Aggregator/server/./src/utils/CacheManager.h:
+#pragma once
+#include <string>
+#include <sw/redis++/redis++.h>
+
+class CacheManager {
+public:
+  CacheManager(const std::string &redis_connection = "tcp://redis:6379");
+
+  std::optional<std::string> get(const std::string &key);
+  void setex(const std::string &key, int ttl, const std::string &value);
+  void del(const std::string &key);
+  void delPattern(const std::string &pattern);
+
+private:
+  sw::redis::Redis redis_;
+};
+
+/media/vitalii/medio/study/News-Aggregator/server/./src/utils/CacheManager.cpp:
+#include "CacheManager.h"
+
+CacheManager::CacheManager(const std::string &redis_connection)
+    : redis_(redis_connection) {}
+
+std::optional<std::string> CacheManager::get(const std::string &key) {
+  return redis_.get(key);
+}
+
+void CacheManager::setex(const std::string &key, int ttl,
+                         const std::string &value) {
+  redis_.setex(key, std::chrono::seconds(ttl), value);
+}
+
+void CacheManager::del(const std::string &key) { redis_.del(key); }
+
+void CacheManager::delPattern(const std::string &pattern) {
+  // Будет реализовано при необходимости
+}
+
+/media/vitalii/medio/study/News-Aggregator/server/./src/PgPool/PgPool.cpp:
+#include "PgPool.h"
+#include "../models/Constants.h"
+#include <chrono>
+#include <iostream>
+#include <thread>
+
+// Реализация деструктора PConn должна быть после полного определения PgPool
+PConn::~PConn() {
+  if (conn && pool)
+    pool->release(conn, is_replica);
+}
+
+PgPool::PgPool(const std::vector<std::string> &conn_infos, size_t pool_size) {
+  for (const auto &conninfo : conn_infos) {
+    for (size_t i = 0; i < pool_size; ++i) {
+      bool connected = false;
+      int attempts = 0;
+      const int max_attempts = 3;
+
+      while (!connected && attempts < max_attempts) {
+        try {
+          auto conn = std::make_shared<pqxx::connection>(conninfo);
+          if (!conn->is_open()) {
+            std::cerr << "Failed to open DB connection: " << conninfo
+                      << std::endl;
+            attempts++;
+            if (attempts < max_attempts) {
+              std::this_thread::sleep_for(std::chrono::seconds(2));
+            }
+            continue;
+          }
+
+          try {
+            pqxx::work txn(*conn);
+            pqxx::result r = txn.exec("SELECT pg_is_in_recovery()");
+            bool is_replica = r[0][0].as<bool>();
+            if (is_replica) {
+              std::cout << "Added REPLICA connection: " << conninfo
+                        << std::endl;
+              replica_pool_.push(conn);
+            } else {
+              std::cout << "Added MASTER connection: " << conninfo << std::endl;
+              master_pool_.push(conn);
+            }
+            connected = true;
+          } catch (const std::exception &e) {
+            std::cerr << "Error checking DB role: " << e.what() << std::endl;
+            replica_pool_.push(conn);
+            connected = true;
+          }
+        } catch (const std::exception &e) {
+          std::cerr << "Failed to create connection (attempt " << (attempts + 1)
+                    << "/" << max_attempts << "): " << e.what() << std::endl;
+          attempts++;
+          if (attempts < max_attempts) {
+            std::this_thread::sleep_for(std::chrono::seconds(2));
+          }
+        }
+      }
+
+      if (!connected) {
+        std::cerr << "Giving up on connection: " << conninfo << std::endl;
+      }
+    }
+  }
+
+  if (master_pool_.empty() && replica_pool_.empty()) {
+    throw std::runtime_error("No valid database connections available");
+  }
+
+  std::cout << "PgPool initialized: " << master_pool_.size()
+            << " master connections, " << replica_pool_.size()
+            << " replica connections" << std::endl;
+}
+
+PConn PgPool::acquire(bool read_only) {
+  std::unique_lock<std::mutex> lk(mutex_);
+
+  // Для операций чтения сначала пытаемся использовать реплику
+  if (read_only && !replica_pool_.empty()) {
+    auto conn = replica_pool_.front();
+    replica_pool_.pop();
+    return PConn{conn, this, true};
+  }
+
+  // Для операций записи или если реплик нет - используем мастер
+  if (!master_pool_.empty()) {
+    auto conn = master_pool_.front();
+    master_pool_.pop();
+
+    // Если это read-only операция и реплик нет, логируем это
+    if (read_only && replica_pool_.empty()) {
+      std::cout << "No replica available, using MASTER for READ operation"
+                << std::endl;
+    }
+
+    return PConn{conn, this, false};
+  }
+
+  // Если мастера нет, но операция read-only - используем реплику
+  if (read_only && !replica_pool_.empty()) {
+    auto conn = replica_pool_.front();
+    replica_pool_.pop();
+    return PConn{conn, this, true};
+  }
+
+  // Ждем доступное соединение с ТАЙМАУТОМ (10 секунд)
+  auto timeout = std::chrono::seconds(10);
+  if (!cv_.wait_for(lk, timeout, [&] {
+        return (!master_pool_.empty()) || (read_only && !replica_pool_.empty());
+      })) {
+    // Таймаут - бросаем исключение с информацией о состоянии
+    std::string error_msg = "Timeout waiting for database connection (";
+    error_msg += read_only ? "READ" : "WRITE";
+    error_msg += " operation). Pool status: ";
+    error_msg += std::to_string(master_pool_.size()) + " master, ";
+    error_msg +=
+        std::to_string(replica_pool_.size()) + " replica connections available";
+    throw std::runtime_error(error_msg);
+  }
+
+  if (!master_pool_.empty()) {
+    auto conn = master_pool_.front();
+    master_pool_.pop();
+    return PConn{conn, this, false};
+  } else {
+    auto conn = replica_pool_.front();
+    replica_pool_.pop();
+    return PConn{conn, this, true};
+  }
+}
+
+void PgPool::health_check() {
+  std::unique_lock<std::mutex> lk(mutex_);
+
+  std::cout << "Starting health check..." << std::endl;
+
+  // Сохраняем оригинальные строки подключения для переподключения
+  static std::string master_conninfo = constants::CONN_STRINGS[0];
+  static std::string replica_conninfo =
+      constants::CONN_STRINGS.size() > 1 ? constants::CONN_STRINGS[1] : "";
+
+  // Проверяем соединения мастера
+  std::queue<std::shared_ptr<pqxx::connection>> new_master_pool;
+  while (!master_pool_.empty()) {
+    auto conn = master_pool_.front();
+    master_pool_.pop();
+    if (check_connection(conn)) {
+      new_master_pool.push(conn);
+    } else {
+      std::cerr << "Master connection failed health check" << std::endl;
+    }
+  }
+
+  // Если мастеров нет или их мало, пытаемся переподключиться
+  if (new_master_pool.size() < constants::POOL_SIZE) {
+    std::cout << "Master pool is low (" << new_master_pool.size()
+              << "), attempting to reconnect..." << std::endl;
+
+    int attempts = 0;
+    const int max_attempts = 2;
+
+    while (new_master_pool.size() < constants::POOL_SIZE &&
+           attempts < max_attempts) {
+      try {
+        auto new_conn = std::make_shared<pqxx::connection>(master_conninfo);
+        if (new_conn->is_open()) {
+          pqxx::work txn(*new_conn);
+          pqxx::result r = txn.exec("SELECT pg_is_in_recovery()");
+          bool is_replica = r[0][0].as<bool>();
+          if (!is_replica) {
+            new_master_pool.push(new_conn);
+            std::cout << "Successfully reconnected to MASTER" << std::endl;
+          } else {
+            std::cerr << "Connected to replica instead of master" << std::endl;
+          }
+        }
+      } catch (const std::exception &e) {
+        std::cerr << "Failed to reconnect to master (attempt " << (attempts + 1)
+                  << "): " << e.what() << std::endl;
+        attempts++;
+        if (attempts < max_attempts) {
+          std::this_thread::sleep_for(std::chrono::seconds(1));
+        }
+      }
+    }
+  }
+
+  master_pool_ = std::move(new_master_pool);
+
+  // Проверяем соединения реплик - с возможностью переподключения
+  std::queue<std::shared_ptr<pqxx::connection>> new_replica_pool;
+
+  // Сначала проверяем существующие соединения реплик
+  while (!replica_pool_.empty()) {
+    auto conn = replica_pool_.front();
+    replica_pool_.pop();
+    if (check_connection(conn)) {
+      new_replica_pool.push(conn);
+    } else {
+      std::cerr << "Replica connection failed health check" << std::endl;
+    }
+  }
+
+  // Если реплик нет или их мало, пытаемся переподключиться
+  if (!replica_conninfo.empty() &&
+      new_replica_pool.size() < constants::POOL_SIZE) {
+    std::cout << "Replica pool is low (" << new_replica_pool.size()
+              << "), attempting to reconnect..." << std::endl;
+
+    int attempts = 0;
+    const int max_attempts = 2;
+
+    while (new_replica_pool.size() < constants::POOL_SIZE &&
+           attempts < max_attempts) {
+      try {
+        auto new_conn = std::make_shared<pqxx::connection>(replica_conninfo);
+        if (new_conn->is_open()) {
+          pqxx::work txn(*new_conn);
+          pqxx::result r = txn.exec("SELECT pg_is_in_recovery()");
+          bool is_replica = r[0][0].as<bool>();
+          if (is_replica) {
+            new_replica_pool.push(new_conn);
+            std::cout << "Successfully reconnected to REPLICA" << std::endl;
+          } else {
+            std::cerr << "Connected to master instead of replica" << std::endl;
+          }
+        }
+      } catch (const std::exception &e) {
+        std::cerr << "Failed to reconnect to replica (attempt "
+                  << (attempts + 1) << "): " << e.what() << std::endl;
+        attempts++;
+        if (attempts < max_attempts) {
+          std::this_thread::sleep_for(std::chrono::seconds(1));
+        }
+      }
+    }
+  }
+
+  replica_pool_ = std::move(new_replica_pool);
+
+  // Логируем состояние пула
+  std::cout << "Health check completed: " << master_pool_.size() << " master, "
+            << replica_pool_.size() << " replica connections" << std::endl;
+
+  cv_.notify_all();
+}
+
+bool PgPool::check_connection(std::shared_ptr<pqxx::connection> conn) {
+  if (!conn->is_open()) {
+    return false;
+  }
+  try {
+    pqxx::work txn(*conn);
+    txn.exec("SELECT 1");
+    return true;
+  } catch (const std::exception &e) {
+    std::cerr << "Connection check failed: " << e.what() << std::endl;
+    return false;
+  }
+}
+
+void PgPool::release(std::shared_ptr<pqxx::connection> conn, bool is_replica) {
+  std::unique_lock<std::mutex> lk(mutex_);
+  if (is_replica) {
+    replica_pool_.push(conn);
+  } else {
+    master_pool_.push(conn);
+  }
+  lk.unlock();
+  cv_.notify_one();
+}
+
+/media/vitalii/medio/study/News-Aggregator/server/./src/PgPool/PgPool.h:
+#pragma once
+#include "../models/Types.h"
+#include <condition_variable>
+#include <memory>
+#include <mutex>
+#include <pqxx/pqxx>
+#include <queue>
+#include <string>
+#include <vector>
+
+class PgPool {
+public:
+  PgPool(const std::vector<std::string> &conn_infos, size_t pool_size = 4);
+  PConn acquire(bool read_only = false);
+  void health_check();
+  void release(std::shared_ptr<pqxx::connection> conn, bool is_replica);
+
+private:
+  bool check_connection(std::shared_ptr<pqxx::connection> conn);
+
+  std::queue<std::shared_ptr<pqxx::connection>> master_pool_;
+  std::queue<std::shared_ptr<pqxx::connection>> replica_pool_;
+  std::mutex mutex_;
+  std::condition_variable cv_;
+};
+
+/media/vitalii/medio/study/News-Aggregator/server/./src/models/Types.h:
+#pragma once
+#include <memory>
+#include <pqxx/pqxx>
+
+// Предварительное объявление класса PgPool
+class PgPool;
+
+struct PConn {
+  std::shared_ptr<pqxx::connection> conn;
+  PgPool *pool;
+  bool is_replica;
+  ~PConn();
+};
+
+/media/vitalii/medio/study/News-Aggregator/server/./src/models/Constants.h:
+#pragma once
+#include <string>
+#include <unordered_map>
+#include <vector>
+
+namespace constants {
+extern const std::vector<std::string> CONN_STRINGS;
+extern const std::unordered_map<std::string, std::string> pk_map;
+extern const std::vector<std::string> valid_tables;
+extern const size_t POOL_SIZE; // Добавляем константу размера пула
+
+bool is_valid_table(const std::string &t);
+} // namespace constants
+
+/media/vitalii/medio/study/News-Aggregator/server/./src/models/Constants.cpp:
+#include "Constants.h"
+
+namespace constants {
+const std::vector<std::string> CONN_STRINGS = {
+    "host=db-master port=5432 dbname=news_db user=news_user password=news_pass",
+    "host=db-replica port=5432 dbname=news_db user=news_user "
+    "password=news_pass"};
+
+const size_t POOL_SIZE = 4; // Размер пула соединений
+
+const std::unordered_map<std::string, std::string> pk_map = {
+    {"users", "user_id"},       {"authors", "author_id"},
+    {"news_texts", "text_id"},  {"sources", "source_id"},
+    {"channels", "channel_id"}, {"posts", "post_id"},
+    {"media", "media_id"},      {"tags", "tag_id"},
+    {"comments", "comment_id"}};
+
+const std::vector<std::string> valid_tables = {"users",
+                                               "authors",
+                                               "news_texts",
+                                               "sources",
+                                               "channels",
+                                               "posts",
+                                               "media",
+                                               "tags",
+                                               "post_tags",
+                                               "comments",
+                                               "channel_activity_stats",
+                                               "author_performance",
+                                               "tag_popularity_detailed",
+                                               "source_post_stats",
+                                               "user_comment_activity",
+                                               "posts_ranked_by_popularity",
+                                               "author_likes_trend",
+                                               "cumulative_posts_analysis",
+                                               "tag_rank_by_channel",
+                                               "commenter_analysis",
+                                               "posts_with_detailed_authors",
+                                               "channels_with_sources",
+                                               "posts_with_authors_and_texts",
+                                               "comments_with_post_info",
+                                               "posts_with_tags_and_channels",
+                                               "media_with_context",
+                                               "comprehensive_post_info",
+                                               "extended_post_analytics"};
+
+bool is_valid_table(const std::string &t) {
+  for (const auto &x : valid_tables)
+    if (x == t)
+      return true;
+  return false;
+}
+} // namespace constants
+
+/media/vitalii/medio/study/News-Aggregator/server/./src/main.cpp:
+#include "PgPool/PgPool.h"
+#include "handlers/handlers.h"
+#include "models/Constants.h"
+#include "mongo/MongoManager.h"
+#include "utils/CacheManager.h"
+#include <chrono>
+#include <httplib.h>
+#include <iostream>
+#include <thread>
+
+int main() {
+  httplib::Server svr;
+
+  // Инициализация компонентов
+  PgPool pool(constants::CONN_STRINGS, constants::POOL_SIZE);
+  CacheManager cache;
+  MongoManager mongo;
+  Handlers handlers(pool, cache, mongo);
+
+  // Настройка маршрутов
+  handlers.setupRoutes(svr);
+
+  // Health check в отдельном потоке
+  std::thread health_checker([&pool]() {
+    while (true) {
+      std::this_thread::sleep_for(std::chrono::seconds(30));
+      try {
+        pool.health_check();
+        std::cout << "Health check completed" << std::endl;
+      } catch (const std::exception &e) {
+        std::cerr << "Health check error: " << e.what() << std::endl;
+      }
+    }
+  });
+  health_checker.detach();
+
+  std::cout << "Server starting on 0.0.0.0:8080" << std::endl;
+  svr.listen("0.0.0.0", 8080);
+  return 0;
+}
+
+/media/vitalii/medio/study/News-Aggregator/server/./src/mongo/MongoManager.h:
+#pragma once
+#include <bsoncxx/builder/stream/document.hpp>
+#include <bsoncxx/json.hpp>
+#include <mongocxx/client.hpp>
+#include <mongocxx/database.hpp>
+#include <mongocxx/instance.hpp>
+#include <nlohmann/json.hpp>
+#include <string>
+#include <vector>
+
+using json = nlohmann::json;
+
+struct SearchResult {
+  int id;
+  std::string title;
+  std::string preview;
+  double relevance;
+  std::vector<std::string> matched_tags;
+};
+
+class MongoManager {
+private:
+  static mongocxx::instance instance;
+  mongocxx::client client;
+  mongocxx::database db;
+
+public:
+  MongoManager(const std::string &uri =
+                   "mongodb://news_app:app_password@mongodb:27017/"
+                   "news_aggregator?authSource=news_aggregator");
+
+  // 🔍 ПОИСК
+  std::vector<SearchResult> searchPosts(const std::string &query,
+                                        int limit = 20);
+  std::vector<SearchResult> searchByTags(const std::vector<std::string> &tags);
+  json advancedSearch(const json &filters, int limit = 20);
+
+  // 📊 АНАЛИТИКА (Aggregation Pipelines)
+  json getDashboardStats();
+  json getTopTags(int limit = 10);
+  json getAuthorStats(int author_id);
+  json getPostEngagementAnalysis(int days = 30);
+  json getChannelPerformance();
+
+  // 💡 РЕКОМЕНДАЦИИ
+  std::vector<int> getSimilarPosts(int post_id, int limit = 5);
+
+  // 🚫 ДЕДУБЛИКАЦИЯ
+  bool isDuplicateContent(const std::string &content_hash);
+
+  // ✍️ CRUD ОПЕРАЦИИ
+  void indexPost(int post_id, const std::string &title,
+                 const std::string &content,
+                 const std::vector<std::string> &tags);
+  void insertMany(const std::vector<json> &posts);
+  void updatePostIndex(int post_id, const std::string &title,
+                       const std::string &content,
+                       const std::vector<std::string> &tags);
+  void incrementViewCount(int post_id);
+  void addTagToPost(int post_id, const std::string &tag);
+  void removeTagFromPost(int post_id, const std::string &tag);
+  void updatePostStats(int post_id, int likes_delta, int comments_delta);
+  void removePostIndex(int post_id);
+  bool upsertPost(int post_id, const json &post_data);
+  void replacePost(int post_id, const json &post_data);
+
+  // 👤 ПОЛЬЗОВАТЕЛЬСКИЕ ВЗАИМОДЕЙСТВИЯ
+  void recordUserInteraction(const std::string &user_id, int post_id,
+                             const std::string &action);
+  json getUserHistory(const std::string &user_id, int limit = 50);
+
+  // 📈 МАТЕРИАЛИЗОВАННЫЕ ПРЕДСТАВЛЕНИЯ (Витрины)
+  void materializeTopPostsView();
+  json getTopPostsFromView(int limit = 10);
+
+  // 🔧 СЛУЖЕБНЫЕ
+  void createIndexes();
+  void createCollections();
+};
+
+/media/vitalii/medio/study/News-Aggregator/server/./src/mongo/MongoManager.cpp:
+#include "MongoManager.h"
+#include <algorithm>
+#include <cstdlib>
+#include <iostream>
+
+using bsoncxx::builder::stream::close_array;
+using bsoncxx::builder::stream::close_document;
+using bsoncxx::builder::stream::document;
+using bsoncxx::builder::stream::finalize;
+using bsoncxx::builder::stream::open_array;
+using bsoncxx::builder::stream::open_document;
+
+mongocxx::instance MongoManager::instance{};
+
+MongoManager::MongoManager(const std::string &uri) {
+  const char *env_uri = std::getenv("MONGODB_URI");
+  std::string connection_uri = env_uri ? env_uri : uri;
+
+  std::cout << "Connecting to MongoDB: " << connection_uri << std::endl;
+
+  try {
+    client = mongocxx::client{mongocxx::uri{connection_uri}};
+    db = client["news_aggregator"];
+    createCollections();
+    createIndexes();
+    std::cout << "MongoDB connected successfully" << std::endl;
+  } catch (const std::exception &e) {
+    std::cerr << "MongoDB connection failed: " << e.what() << std::endl;
+    throw;
+  }
+}
+
+void MongoManager::createCollections() {
+  try {
+    // Создаем коллекции если их нет
+    db.create_collection("posts");
+    db.create_collection("user_interactions");
+    db.create_collection("top_posts_view");
+  } catch (...) {
+    // Коллекции уже существуют
+  }
+}
+
+void MongoManager::createIndexes() {
+  auto posts = db["posts"];
+  auto interactions = db["user_interactions"];
+  auto top_posts = db["top_posts_view"];
+
+  // ============ ИНДЕКСЫ ДЛЯ POSTS ============
+
+  // 1. Текстовый индекс для полнотекстового поиска
+  posts.create_index(document{} << "title" << "text" << "content" << "text"
+                                << "tags" << "text" << finalize,
+                     mongocxx::options::index{}.weights(
+                         document{} << "title" << 10 << "content" << 5 << "tags"
+                                    << 3 << finalize));
+
+  // 2. Unique индекс для post_id
+  posts.create_index(document{} << "post_id" << 1 << finalize,
+                     mongocxx::options::index{}.unique(true));
+
+  // 3. Unique индекс для дедубликации по content_hash
+  posts.create_index(document{} << "content_hash" << 1 << finalize,
+                     mongocxx::options::index{}.unique(true).sparse(true));
+
+  // 4. Составной индекс для поиска по тегам и сортировке
+  posts.create_index(document{} << "tags" << 1 << "stats.likes" << -1
+                                << "created_at" << -1 << finalize);
+
+  // 5. Индекс по массиву тегов (multikey index)
+  posts.create_index(document{} << "tags" << 1 << finalize);
+
+  // 6. Partial индекс для активных постов (с большим количеством лайков)
+  posts.create_index(document{} << "stats.likes" << -1 << finalize,
+                     mongocxx::options::index{}.partial_filter_expression(
+                         document{} << "stats.likes" << open_document << "$gte"
+                                    << 10 << close_document << finalize));
+
+  // 7. TTL индекс для временных/старых постов (опционально)
+  // Удаляет посты старше 1 года автоматически
+  posts.create_index(
+      document{} << "created_at" << 1 << finalize,
+      mongocxx::options::index{}.expire_after(std::chrono::seconds(31536000)));
+
+  // 8. Составной индекс для аналитики
+  posts.create_index(document{} << "author_id" << 1 << "created_at" << -1
+                                << finalize);
+
+  // ============ ИНДЕКСЫ ДЛЯ USER_INTERACTIONS ============
+
+  // 1. Compound index для поиска взаимодействий пользователя
+  interactions.create_index(document{} << "user_id" << 1 << "timestamp" << -1
+                                       << finalize);
+
+  // 2. Index для поиска по посту
+  interactions.create_index(document{} << "post_id" << 1 << finalize);
+
+  // 3. TTL index - автоматически удаляет старые взаимодействия (90 дней)
+  interactions.create_index(
+      document{} << "timestamp" << 1 << finalize,
+      mongocxx::options::index{}.expire_after(std::chrono::seconds(7776000)));
+
+  // ============ ИНДЕКСЫ ДЛЯ TOP_POSTS_VIEW ============
+  top_posts.create_index(document{} << "total_score" << -1 << finalize);
+
+  std::cout << "MongoDB indexes created" << std::endl;
+}
+
+// ============ CRUD ОПЕРАЦИИ ============
+
+void MongoManager::indexPost(int post_id, const std::string &title,
+                             const std::string &content,
+                             const std::vector<std::string> &tags) {
+  auto posts = db["posts"];
+
+  std::string content_hash =
+      std::to_string(std::hash<std::string>{}(title + content));
+
+  auto doc =
+      document{} << "post_id" << post_id << "title" << title << "content"
+                 << content << "content_hash" << content_hash << "tags"
+                 << open_array <<
+      [&tags](bsoncxx::builder::stream::array_context<> arr) {
+        for (const auto &tag : tags)
+          arr << tag;
+      } << close_array
+                 << "stats" << open_document << "views" << 0 << "likes" << 0
+                 << "comments" << 0 << close_document << "created_at"
+                 << bsoncxx::types::b_date{std::chrono::system_clock::now()}
+                 << "updated_at"
+                 << bsoncxx::types::b_date{std::chrono::system_clock::now()}
+                 << finalize;
+
+  posts.insert_one(doc.view());
+}
+
+void MongoManager::insertMany(const std::vector<json> &posts_data) {
+  auto posts = db["posts"];
+  std::vector<bsoncxx::document::value> docs;
+
+  for (const auto &post : posts_data) {
+    auto doc =
+        document{} << "post_id" << post["post_id"].get<int>() << "title"
+                   << post["title"].get<std::string>() << "content"
+                   << post["content"].get<std::string>() << "tags" << open_array
+                   <<
+        [&post](bsoncxx::builder::stream::array_context<> arr) {
+          if (post.contains("tags")) {
+            for (const auto &tag : post["tags"]) {
+              arr << tag.get<std::string>();
+            }
+          }
+        } << close_array
+                   << "stats" << open_document << "views" << 0 << "likes" << 0
+                   << "comments" << 0 << close_document << "created_at"
+                   << bsoncxx::types::b_date{std::chrono::system_clock::now()}
+                   << finalize;
+
+    docs.push_back(doc.extract());
+  }
+
+  if (!docs.empty()) {
+    posts.insert_many(docs);
+  }
+}
+
+void MongoManager::updatePostIndex(int post_id, const std::string &title,
+                                   const std::string &content,
+                                   const std::vector<std::string> &tags) {
+  auto posts = db["posts"];
+
+  std::string content_hash =
+      std::to_string(std::hash<std::string>{}(title + content));
+
+  // $set - обновление полей
+  auto update_doc = document{}
+                    << "$set" << open_document << "title" << title << "content"
+                    << content << "content_hash" << content_hash << "tags"
+                    << open_array <<
+                    [&tags](bsoncxx::builder::stream::array_context<> arr) {
+                      for (const auto &tag : tags)
+                        arr << tag;
+                    }
+                    << close_array << "updated_at"
+                    << bsoncxx::types::b_date{std::chrono::system_clock::now()}
+                    << close_document << finalize;
+
+  posts.update_one(document{} << "post_id" << post_id << finalize,
+                   update_doc.view());
+}
+
+void MongoManager::incrementViewCount(int post_id) {
+  auto posts = db["posts"];
+
+  // $inc - инкремент счетчика
+  posts.update_one(document{} << "post_id" << post_id << finalize,
+                   document{} << "$inc" << open_document << "stats.views" << 1
+                              << close_document << finalize);
+}
+
+void MongoManager::addTagToPost(int post_id, const std::string &tag) {
+  auto posts = db["posts"];
+
+  // $addToSet - добавление в массив без дубликатов
+  posts.update_one(document{} << "post_id" << post_id << finalize,
+                   document{} << "$addToSet" << open_document << "tags" << tag
+                              << close_document << finalize);
+}
+
+void MongoManager::removeTagFromPost(int post_id, const std::string &tag) {
+  auto posts = db["posts"];
+
+  // $pull - удаление из массива
+  posts.update_one(document{} << "post_id" << post_id << finalize,
+                   document{} << "$pull" << open_document << "tags" << tag
+                              << close_document << finalize);
+}
+
+void MongoManager::updatePostStats(int post_id, int likes_delta,
+                                   int comments_delta) {
+  auto posts = db["posts"];
+
+  // $inc для нескольких полей сразу
+  posts.update_one(document{} << "post_id" << post_id << finalize,
+                   document{} << "$inc" << open_document << "stats.likes"
+                              << likes_delta << "stats.comments"
+                              << comments_delta << close_document << finalize);
+}
+
+bool MongoManager::upsert(int post_id, const json &post_data) {
+  auto posts = db["posts"];
+
+  auto doc =
+      document{} << "$set" << open_document << "post_id" << post_id << "title"
+                 << post_data["title"].get<std::string>() << "content"
+                 << post_data["content"].get<std::string>() << "updated_at"
+                 << bsoncxx::types::b_date{std::chrono::system_clock::now()}
+                 << close_document << "$setOnInsert" << open_document
+                 << "created_at"
+                 << bsoncxx::types::b_date{std::chrono::system_clock::now()}
+                 << "stats" << open_document << "views" << 0 << "likes" << 0
+                 << "comments" << 0 << close_document << close_document
+                 << finalize;
+
+  mongocxx::options::update opts;
+  opts.upsert(true);
+
+  auto result = posts.update_one(document{} << "post_id" << post_id << finalize,
+                                 doc.view(), opts);
+
+  return result && result->upserted_id();
+}
+
+void MongoManager::replacePost(int post_id, const json &post_data) {
+  auto posts = db["posts"];
+
+  auto doc =
+      document{} << "post_id" << post_id << "title"
+                 << post_data["title"].get<std::string>() << "content"
+                 << post_data["content"].get<std::string>() << "tags"
+                 << open_array <<
+      [&post_data](bsoncxx::builder::stream::array_context<> arr) {
+        if (post_data.contains("tags")) {
+          for (const auto &tag : post_data["tags"]) {
+            arr << tag.get<std::string>();
+          }
+        }
+      } << close_array
+                 << "stats" << open_document << "views" << 0 << "likes" << 0
+                 << "comments" << 0 << close_document << "created_at"
+                 << bsoncxx::types::b_date{std::chrono::system_clock::now()}
+                 << finalize;
+
+  posts.replace_one(document{} << "post_id" << post_id << finalize, doc.view());
+}
+
+void MongoManager::removePostIndex(int post_id) {
+  auto posts = db["posts"];
+  posts.delete_one(document{} << "post_id" << post_id << finalize);
+}
+
+// ============ ПОИСК С ФИЛЬТРАМИ ============
+
+json MongoManager::advancedSearch(const json &filters, int limit) {
+  auto posts = db["posts"];
+  json results = json::array();
+
+  // Строим фильтр для MongoDB
+  auto filter_doc = document{};
+
+  // $and/$or/$in/$nin операторы
+  if (filters.contains("tags") && filters["tags"].is_array()) {
+    filter_doc << "tags" << open_document << "$in" << open_array <<
+        [&filters](bsoncxx::builder::stream::array_context<> arr) {
+          for (const auto &tag : filters["tags"]) {
+            arr << tag.get<std::string>();
+          }
+        } << close_array
+               << close_document;
+  }
+
+  // $gte/$lte для диапазонов
+  if (filters.contains("min_likes")) {
+    filter_doc << "stats.likes" << open_document << "$gte"
+               << filters["min_likes"].get<int>() << close_document;
+  }
+
+  if (filters.contains("exclude_tags") && filters["exclude_tags"].is_array()) {
+    filter_doc << "tags" << open_document << "$nin" << open_array <<
+        [&filters](bsoncxx::builder::stream::array_context<> arr) {
+          for (const auto &tag : filters["exclude_tags"]) {
+            arr << tag.get<std::string>();
+          }
+        } << close_array
+               << close_document;
+  }
+
+  auto filter = filter_doc << finalize;
+
+  // Проекция - выбор только нужных полей
+  auto projection = document{} << "post_id" << 1 << "title" << 1 << "tags" << 1
+                               << "stats" << 1 << "_id" << 0 << finalize;
+
+  mongocxx::options::find opts;
+  opts.projection(projection.view());
+  opts.limit(limit);
+  opts.sort(document{} << "stats.likes" << -1 << finalize);
+
+  auto cursor = posts.find(filter.view(), opts);
+
+  for (auto &&doc : cursor) {
+    json item;
+    item["id"] = doc["post_id"].get_int32();
+    item["title"] = doc["title"].get_string().value.to_string();
+
+    if (doc["stats"]) {
+      auto stats = doc["stats"].get_document();
+      item["likes"] = stats.view()["likes"].get_int32();
+      item["views"] = stats.view()["views"].get_int32();
+    }
+
+    results.push_back(item);
+  }
+
+  return results;
+}
+
+// ============ AGGREGATION PIPELINES ============
+
+json MongoManager::getDashboardStats() {
+  auto posts = db["posts"];
+
+  // Pipeline 1: Общая статистика с группировкой
+  mongocxx::pipeline pipeline;
+
+  // $match - фильтрация
+  pipeline.match(document{}
+                 << "created_at" << open_document << "$gte"
+                 << bsoncxx::types::b_date{std::chrono::system_clock::now() -
+                                           std::chrono::hours(24 * 30)}
+                 << close_document << finalize);
+
+  // $project - выбор полей
+  pipeline.project(document{} << "post_id" << 1 << "stats" << 1 << "tags" << 1
+                              << "created_at" << 1 << finalize);
+
+  // $group - агрегация
+  pipeline.group(document{}
+                 << "_id" << bsoncxx::types::b_null{} << "total_posts"
+                 << open_document << "$sum" << 1 << close_document
+                 << "total_likes" << open_document << "$sum" << "$stats.likes"
+                 << close_document << "total_views" << open_document << "$sum"
+                 << "$stats.views" << close_document << "avg_likes"
+                 << open_document << "$avg" << "$stats.likes" << close_document
+                 << finalize);
+
+  auto cursor = posts.aggregate(pipeline);
+
+  json stats;
+  for (auto &&doc : cursor) {
+    stats["total_posts"] = doc["total_posts"].get_int32();
+    stats["total_likes"] = doc["total_likes"].get_int32();
+    stats["total_views"] = doc["total_views"].get_int32();
+    stats["avg_likes"] = doc["avg_likes"].get_double();
+  }
+
+  return stats;
+}
+
+json MongoManager::getTopTags(int limit) {
+  auto posts = db["posts"];
+
+  // Pipeline 2: Топ тегов с $unwind
+  mongocxx::pipeline pipeline;
+
+  // $unwind - разворачиваем массив tags
+  pipeline.unwind("$tags");
+
+  // $group - группируем по тегу
+  pipeline.group(document{} << "_id" << "$tags" << "count" << open_document
+                            << "$sum" << 1 << close_document << "total_likes"
+                            << open_document << "$sum" << "$stats.likes"
+                            << close_document << finalize);
+
+  // $sort - сортировка
+  pipeline.sort(document{} << "count" << -1 << finalize);
+
+  // $limit - ограничение
+  pipeline.limit(limit);
+
+  // $project - финальная проекция
+  pipeline.project(document{} << "tag" << "$_id" << "count" << 1
+                              << "total_likes" << 1 << "_id" << 0 << finalize);
+
+  auto cursor = posts.aggregate(pipeline);
+
+  json tags = json::array();
+  for (auto &&doc : cursor) {
+    json tag;
+    tag["name"] = doc["tag"].get_string().value.to_string();
+    tag["count"] = doc["count"].get_int32();
+    tag["total_likes"] = doc["total_likes"].get_int32();
+    tags.push_back(tag);
+  }
+
+  return tags;
+}
+
+json MongoManager::getPostEngagementAnalysis(int days) {
+  auto posts = db["posts"];
+
+  // Pipeline 3: Анализ вовлеченности с временными интервалами
+  mongocxx::pipeline pipeline;
+
+  pipeline.match(document{}
+                 << "created_at" << open_document << "$gte"
+                 << bsoncxx::types::b_date{std::chrono::system_clock::now() -
+                                           std::chrono::hours(24 * days)}
+                 << close_document << finalize);
+
+  // Добавляем вычисляемое поле - engagement rate
+  pipeline.add_fields(document{}
+                      << "engagement_rate" << open_document << "$divide"
+                      << open_array << open_document << "$add" << open_array
+                      << "$stats.likes" << "$stats.comments" << close_array
+                      << close_document << open_document << "$max" << open_array
+                      << "$stats.views" << 1 << close_array << close_document
+                      << close_array << close_document << finalize);
+
+  pipeline.group(document{} << "_id" << bsoncxx::types::b_null{}
+                            << "avg_engagement" << open_document << "$avg"
+                            << "$engagement_rate" << close_document
+                            << "max_engagement" << open_document << "$max"
+                            << "$engagement_rate" << close_document
+                            << "posts_analyzed" << open_document << "$sum" << 1
+                            << close_document << finalize);
+
+  auto cursor = posts.aggregate(pipeline);
+
+  json analysis;
+  for (auto &&doc : cursor) {
+    analysis["avg_engagement"] = doc["avg_engagement"].get_double();
+    analysis["max_engagement"] = doc["max_engagement"].get_double();
+    analysis["posts_analyzed"] = doc["posts_analyzed"].get_int32();
+  }
+
+  return analysis;
+}
+
+json MongoManager::getChannelPerformance() {
+  auto posts = db["posts"];
+
+  // Pipeline 4: Производительность каналов с $lookup (1 -> N связь)
+  mongocxx::pipeline pipeline;
+
+  // Группируем по channel_id (если он есть в документах)
+  pipeline.group(document{}
+                 << "_id" << "$channel_id" << "post_count" << open_document
+                 << "$sum" << 1 << close_document << "total_likes"
+                 << open_document << "$sum" << "$stats.likes" << close_document
+                 << "total_views" << open_document << "$sum" << "$stats.views"
+                 << close_document << "avg_likes_per_post" << open_document
+                 << "$avg" << "$stats.likes" << close_document << finalize);
+
+  pipeline.sort(document{} << "total_likes" << -1 << finalize);
+  pipeline.limit(10);
+
+  auto cursor = posts.aggregate(pipeline);
+
+  json channels = json::array();
+  for (auto &&doc : cursor) {
+    json channel;
+    if (doc["_id"].type() != bsoncxx::type::k_null) {
+      channel["channel_id"] = doc["_id"].get_int32();
+    } else {
+      channel["channel_id"] = nullptr;
+    }
+    channel["post_count"] = doc["post_count"].get_int32();
+    channel["total_likes"] = doc["total_likes"].get_int32();
+    channel["total_views"] = doc["total_views"].get_int32();
+    channel["avg_likes_per_post"] = doc["avg_likes_per_post"].get_double();
+    channels.push_back(channel);
+  }
+
+  return channels;
+}
+
+// ============ ПОЛЬЗОВАТЕЛЬСКИЕ ВЗАИМОДЕЙСТВИЯ ============
+
+void MongoManager::recordUserInteraction(const std::string &user_id,
+                                         int post_id,
+                                         const std::string &action) {
+  auto interactions = db["user_interactions"];
+
+  auto doc =
+      document{} << "user_id" << user_id << "post_id" << post_id << "action"
+                 << action << "timestamp"
+                 << bsoncxx::types::b_date{std::chrono::system_clock::now()}
+                 << finalize;
+
+  interactions.insert_one(doc.view());
+}
+
+json MongoManager::getUserHistory(const std::string &user_id, int limit) {
+  auto interactions = db["user_interactions"];
+
+  mongocxx::pipeline pipeline;
+
+  pipeline.match(document{} << "user_id" << user_id << finalize);
+
+  // $lookup - соединяем с коллекцией posts (N -> N связь через post_id)
+  pipeline.lookup(document{} << "from" << "posts" << "localField" << "post_id"
+                             << "foreignField" << "post_id" << "as"
+                             << "post_details" << finalize);
+
+  // $unwind для post_details
+  pipeline.unwind("$post_details");
+
+  pipeline.sort(document{} << "timestamp" << -1 << finalize);
+  pipeline.limit(limit);
+
+  pipeline.project(document{} << "action" << 1 << "timestamp" << 1 << "post_id"
+                              << 1 << "post_title" << "$post_details.title"
+                              << "_id" << 0 << finalize);
+
+  auto cursor = interactions.aggregate(pipeline);
+
+  json history = json::array();
+  for (auto &&doc : cursor) {
+    json item;
+    item["action"] = doc["action"].get_string().value.to_string();
+    item["post_id"] = doc["post_id"].get_int32();
+    item["post_title"] = doc["post_title"].get_string().value.to_string();
+    history.push_back(item);
+  }
+
+  return history;
+}
+
+// ============ МАТЕРИАЛИЗОВАННОЕ ПРЕДСТАВЛЕНИЕ ============
+
+void MongoManager::materializeTopPostsView() {
+  auto posts = db["posts"];
+  auto top_posts_view = db["top_posts_view"];
+
+  // Очищаем старую витрину
+  top_posts_view.delete_many({});
+
+  // Pipeline 5: Создаем витрину топовых постов
+  mongocxx::pipeline pipeline;
+
+  pipeline.match(document{}
+                 << "created_at" << open_document << "$gte"
+                 << bsoncxx::types::b_date{std::chrono::system_clock::now() -
+                                           std::chrono::hours(24 * 7)}
+                 << close_document << finalize);
+
+  // Вычисляем общий score
+  pipeline.add_fields(
+      document{} << "total_score" << open_document << "$add" << open_array
+                 << open_document << "$multiply" << open_array << "$stats.likes"
+                 << 3 << close_array << close_document << open_document
+                 << "$multiply" << open_array << "$stats.comments" << 2
+                 << close_array << close_document << "$stats.views"
+                 << close_array << close_document << finalize);
+
+  pipeline.sort(document{} << "total_score" << -1 << finalize);
+  pipeline.limit(100);
+
+  pipeline.out("top_posts_view");
+
+  posts.aggregate(pipeline);
+
+  std::cout << "Top posts view materialized" << std::endl;
+}
+
+json MongoManager::getTopPostsFromView(int limit) {
+  auto top_posts_view = db["top_posts_view"];
+
+  mongocxx::options::find opts;
+  opts.sort(document{} << "total_score" << -1 << finalize);
+  opts.limit(limit);
+
+  auto cursor = top_posts_view.find({}, opts);
+
+  json posts = json::array();
+  for (auto &&doc : cursor) {
+    json post;
+    post["post_id"] = doc["post_id"].get_int32();
+    post["title"] = doc["title"].get_string().value.to_string();
+    post["total_score"] = doc["total_score"].get_double();
+
+    if (doc["stats"]) {
+      auto stats = doc["stats"].get_document();
+      post["likes"] = stats.view()["likes"].get_int32();
+      post["views"] = stats.view()["views"].get_int32();
+      post["comments"] = stats.view()["comments"].get_int32();
+    }
+
+    posts.push_back(post);
+  }
+
+  return posts;
+}
+
+// ============ ОСТАЛЬНЫЕ МЕТОДЫ (из предыдущей версии) ============
+
+bool MongoManager::isDuplicateContent(const std::string &content_hash) {
+  auto posts = db["posts"];
+  auto result =
+      posts.find_one(document{} << "content_hash" << content_hash << finalize);
+  return static_cast<bool>(result);
+}
+
+std::vector<SearchResult> MongoManager::searchPosts(const std::string &query,
+                                                    int limit) {
+  auto posts = db["posts"];
+  std::vector<SearchResult> results;
+
+  try {
+    auto cursor = posts.find(
+        document{} << "$text" << open_document << "$search" << query
+                   << "$language" << "russian" << close_document << finalize,
+        mongocxx::options::find{}
+            .projection(document{} << "post_id" << 1 << "title" << 1
+                                   << "content" << 1 << "tags" << 1 << "score"
+                                   << open_document << "$meta" << "textScore"
+                                   << close_document << finalize)
+            .sort(document{} << "score" << open_document << "$meta"
+                             << "textScore" << close_document << finalize)
+            .limit(limit));
+
+    for (auto &&doc : cursor) {
+      SearchResult result;
+      result.id = doc["post_id"].get_int32();
+      result.title = doc["title"].get_string().value.to_string();
+
+      std::string content = doc["content"].get_string().value.to_string();
+      result.preview = content.substr(0, 200) + "...";
+
+      if (doc["score"]) {
+        result.relevance = doc["score"].get_double();
+      }
+
+      if (doc["tags"] && doc["tags"].type() == bsoncxx::type::k_array) {
+        auto tags_array = doc["tags"].get_array().value;
+        for (auto &&tag : tags_array) {
+          result.matched_tags.push_back(tag.get_string().value.to_string());
+        }
+      }
+
+      results.push_back(result);
+    }
+  } catch (const std::exception &e) {
+    std::cerr << "MongoDB search error: " << e.what() << std::endl;
+  }
+
+  return results;
+}
+
+std::vector<int> MongoManager::getSimilarPosts(int post_id, int limit) {
+  auto posts = db["posts"];
+  std::vector<int> similar_ids;
+
+  // Получаем теги текущего поста
+  auto current_post =
+      posts.find_one(document{} << "post_id" << post_id << finalize);
+
+  if (!current_post)
+    return similar_ids;
+
+  auto tags_element = current_post->view()["tags"];
+  if (!tags_element || tags_element.type() != bsoncxx::type::k_array) {
+    return similar_ids;
+  }
+
+  auto tags_array = tags_element.get_array().value;
+  std::vector<std::string> tags;
+  for (auto &&tag : tags_array) {
+    tags.push_back(tag.get_string().value.to_string());
+  }
+
+  // Ищем похожие посты по тегам
+  auto cursor = posts.find(
+      document{} << "post_id" << open_document << "$ne" << post_id
+                 << close_document << "tags" << open_document << "$in"
+                 << open_array <<
+          [&tags](bsoncxx::builder::stream::array_context<> arr) {
+            for (const auto &tag : tags)
+              arr << tag;
+          } << close_array
+                 << close_document << finalize,
+      mongocxx::options::find{}
+          .sort(document{} << "stats.likes" << -1 << finalize)
+          .limit(limit));
+
+  for (auto &&doc : cursor) {
+    similar_ids.push_back(doc["post_id"].get_int32());
+  }
+
+  return similar_ids;
+}
+
+json MongoManager::getAuthorStats(int author_id) {
+  // Заглушка - можно расширить
+  json stats;
+  stats["author_id"] = author_id;
+  return stats;
+}
+
+std::vector<SearchResult>
+MongoManager::searchByTags(const std::vector<std::string> &tags) {
+  // Заглушка - можно расширить
+  return std::vector<SearchResult>();
+}
+
+/media/vitalii/medio/study/News-Aggregator/server/./Makefile:
+CXX = g++
+
+# Пути к заголовочным файлам
+INCLUDES = -I/tmp/cpp-httplib \
+           -Isrc \
+           -I/usr/local/include \
+           -I/usr/local/include/mongocxx/v_noabi \
+           -I/usr/local/include/bsoncxx/v_noabi \
+           -I/usr/local/include/libmongoc-1.0 \
+           -I/usr/local/include/libbson-1.0
+
+# Флаги компиляции
+CXXFLAGS = -std=c++17 -Wall -O2
+
+# Пути к библиотекам
+LDFLAGS = -L/usr/local/lib \
+          -lpqxx -lpq \
+          -pthread \
+          -lredis++ -lhiredis \
+          -lmongocxx -lbsoncxx \
+          -lmongoc-1.0 -lbson-1.0 \
+          -lssl -lcrypto \
+          -lsasl2 \
+          -lresolv
+
+# Исходные файлы
+SRC = src/models/Constants.cpp \
+      src/utils/CacheManager.cpp \
+      src/PgPool/PgPool.cpp \
+      src/handlers/handlers.cpp \
+      src/mongo/MongoManager.cpp \
+      src/main.cpp
+      
+OBJ = $(SRC:.cpp=.o)
+TARGET = server
+
+all: $(TARGET)
+
+$(TARGET): $(OBJ)
+	@echo "Linking $(TARGET)..."
+	$(CXX) $(OBJ) -o $(TARGET) $(LDFLAGS)
+	@echo "Build successful!"
+
+%.o: %.cpp
+	@echo "Compiling $<..."
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+clean:
+	rm -f $(OBJ) $(TARGET)
+	@echo "Clean complete!"
+
+test:
+	@echo "Testing MongoDB connection..."
+	@pkg-config --cflags --libs libmongocxx || echo "mongocxx not found in pkg-config"
+	@echo "Include paths:"
+	@echo "$(INCLUDES)"
+
+.PHONY: all clean test
+

@@ -51,20 +51,48 @@ services:
       retries: 10
       start_period: 30s
 
+  mongodb:
+    image: mongo:7
+    container_name: mongodb
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: mongopass
+      MONGO_INITDB_DATABASE: news_aggregator
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+      - ./db/mongo-init.js:/docker-entrypoint-initdb.d/mongo-init.js:ro
+    command: 
+      - --auth
+      - --bind_ip_all
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/news_aggregator --quiet
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+
   redis:
-    image: redis:7
+    image: redis:7-alpine
+    container_name: redis
     ports:
       - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --save 60 1 --loglevel warning
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 3s
       retries: 5
 
+  # Go сервер вместо C++
   server:
     build:
-      context: .
-      dockerfile: ./server/Dockerfile
+      context: ./server-go
+      dockerfile: Dockerfile
+    container_name: news-server-go
     depends_on:
       redis:
         condition: service_healthy
@@ -72,24 +100,36 @@ services:
         condition: service_healthy
       db-replica:
         condition: service_healthy
+      mongodb:
+        condition: service_healthy
     environment:
-      - WAIT_HOSTS=db-master:5432,db-replica:5432,redis:6379
-      - WAIT_HOSTS_TIMEOUT=300
-      - WAIT_SLEEP_INTERVAL=5
-      - WAIT_HOST_CONNECT_TIMEOUT=30
+      - MONGODB_URI=mongodb://news_app:app_password@mongodb:27017/news_aggregator?authSource=news_aggregator
+      - POSTGRES_MASTER=host=db-master port=5432 dbname=news_db user=news_user password=news_pass sslmode=disable
+      - POSTGRES_REPLICA=host=db-replica port=5432 dbname=news_db user=news_user password=news_pass sslmode=disable
+      - REDIS_ADDR=redis:6379
     ports:
       - "8080:8080"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
+  # Опционально: researcher-vk
   researcher-vk:
     build:
       context: .
       dockerfile: ./researchers/vk/Dockerfile
+    container_name: vk-researcher
     depends_on:
       server:
-        condition: service_started
+        condition: service_healthy
     volumes:
       - ./config/researchers.xml:/usr/local/etc/vk-researcher/test_conf.xml
       - ./researchers/vk/access_token:/usr/local/etc/vk-researcher/access_token
+    restart: unless-stopped
 
   researcher-reddit:
     build:
@@ -103,6 +143,7 @@ services:
       - ./researchers/reddit/access_data:/usr/local/etc/reddit-researcher/access_data
       - ./researchers/reddit/token_cache.json:/usr/local/etc/reddit-researcher/token_cache.json
   
+  # Backup сервис
   backup:
     build:
       context: ./backups
@@ -113,14 +154,27 @@ services:
       POSTGRES_PASSWORD: news_pass
     volumes:
       - ./backups:/backups
-      - ./db:/db:ro  # для init скриптов
+      - ./db:/db:ro
       - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       db-master:
         condition: service_healthy
       db-replica:
         condition: service_healthy
+    restart: unless-stopped
 
 volumes:
   postgres_master_data:
+    driver: local
+  postgres_replica_data:
+    driver: local
+  mongodb_data:
+    driver: local
+  redis_data:
+    driver: local
+
+networks:
+  default:
+    name: news-aggregator-network
+    driver: bridge
   postgres_replica_data:
