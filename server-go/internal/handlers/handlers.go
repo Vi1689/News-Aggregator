@@ -77,34 +77,36 @@ func NewHandlers(pool *pgpool.PgPool, cache *cache.CacheManager, mongo *mongo.Mo
 }
 
 func (h *Handlers) SetupRoutes() http.Handler {
-    r := mux.NewRouter()
+	r := mux.NewRouter()
 
-    // Health check endpoint
-    r.HandleFunc("/health", h.healthHandler).Methods("GET")
+	// Health check endpoint
+	r.HandleFunc("/health", h.healthHandler).Methods("GET")
 
-    // MongoDB endpoints - должны быть ДО табличных маршрутов
-    r.HandleFunc("/api/mongo/search/advanced", h.advancedSearchHandler).Methods("POST")
-    r.HandleFunc("/api/mongo/analytics/top-tags", h.topTagsHandler).Methods("GET")
-    r.HandleFunc("/api/mongo/analytics/engagement", h.engagementAnalysisHandler).Methods("GET")
-    r.HandleFunc("/api/mongo/user/{user_id}/history", h.userHistoryHandler).Methods("GET")
-    r.HandleFunc("/api/mongo/top-posts", h.topPostsViewHandler).Methods("GET")
-    r.HandleFunc("/api/mongo/posts/{post_id}/operations", h.postOperationsHandler).Methods("POST")
-    r.HandleFunc("/api/mongo/analytics/channels", h.channelPerformanceHandler).Methods("GET")
-    r.HandleFunc("/api/mongo/materialize", h.materializeViewHandler).Methods("POST")
+	// MongoDB endpoints - должны быть ДО табличных маршрутов
+	r.HandleFunc("/api/mongo/search/advanced", h.advancedSearchHandler).Methods("POST")
+	r.HandleFunc("/api/mongo/analytics/top-tags", h.topTagsHandler).Methods("GET")
+	r.HandleFunc("/api/mongo/analytics/engagement", h.engagementAnalysisHandler).Methods("GET")
+	r.HandleFunc("/api/mongo/user/{user_id}/history", h.userHistoryHandler).Methods("GET")
+	r.HandleFunc("/api/mongo/top-posts", h.topPostsViewHandler).Methods("GET")
+	r.HandleFunc("/api/mongo/posts/{post_id}/operations", h.postOperationsHandler).Methods("POST")
+	r.HandleFunc("/api/mongo/analytics/channels", h.channelPerformanceHandler).Methods("GET")
+	r.HandleFunc("/api/mongo/materialize", h.materializeViewHandler).Methods("POST")
 
-    // CRUD операции для PostgreSQL
-    r.HandleFunc("/api/{table}", h.createHandler).Methods("POST")
-    r.HandleFunc("/api/{table}", h.readAllHandler).Methods("GET")
-    r.HandleFunc("/api/{table}/{id}", h.readOneHandler).Methods("GET")
-    r.HandleFunc("/api/{table}/{id}", h.updateHandler).Methods("PUT")
-    r.HandleFunc("/api/{table}/{id}", h.deleteHandler).Methods("DELETE")
+	h.SetupExtendedRoutes(r)
 
-    // Обработка post_tags с двумя ID
-    r.HandleFunc("/api/{table}/{id}/{id2}", h.readOneHandler).Methods("GET")
-    r.HandleFunc("/api/{table}/{id}/{id2}", h.updateHandler).Methods("PUT")
-    r.HandleFunc("/api/{table}/{id}/{id2}", h.deleteHandler).Methods("DELETE")
+	// CRUD операции для PostgreSQL
+	r.HandleFunc("/api/{table}", h.createHandler).Methods("POST")
+	r.HandleFunc("/api/{table}", h.readAllHandler).Methods("GET")
+	r.HandleFunc("/api/{table}/{id}", h.readOneHandler).Methods("GET")
+	r.HandleFunc("/api/{table}/{id}", h.updateHandler).Methods("PUT")
+	r.HandleFunc("/api/{table}/{id}", h.deleteHandler).Methods("DELETE")
 
-    return r
+	// Обработка post_tags с двумя ID
+	r.HandleFunc("/api/{table}/{id}/{id2}", h.readOneHandler).Methods("GET")
+	r.HandleFunc("/api/{table}/{id}/{id2}", h.updateHandler).Methods("PUT")
+	r.HandleFunc("/api/{table}/{id}/{id2}", h.deleteHandler).Methods("DELETE")
+
+	return r
 }
 
 func (h *Handlers) healthHandler(w http.ResponseWriter, r *http.Request) {

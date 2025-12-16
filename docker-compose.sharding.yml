@@ -1,0 +1,165 @@
+# docker-compose.sharding.yml
+# MongoDB Sharded Cluster Setup
+
+services:
+  # ============================================
+  # CONFIG SERVERS (Replica Set)
+  # ============================================
+  
+  config1:
+    image: mongo:7
+    container_name: mongo-config1
+    command: mongod --configsvr --replSet configRS --port 27019 --dbpath /data/db
+    ports:
+      - "27019:27019"
+    volumes:
+      - config1_data:/data/db
+    networks:
+      - mongo-shard
+
+  config2:
+    image: mongo:7
+    container_name: mongo-config2
+    command: mongod --configsvr --replSet configRS --port 27019 --dbpath /data/db
+    ports:
+      - "27020:27019"
+    volumes:
+      - config2_data:/data/db
+    networks:
+      - mongo-shard
+
+  config3:
+    image: mongo:7
+    container_name: mongo-config3
+    command: mongod --configsvr --replSet configRS --port 27019 --dbpath /data/db
+    ports:
+      - "27021:27019"
+    volumes:
+      - config3_data:/data/db
+    networks:
+      - mongo-shard
+
+  # ============================================
+  # SHARD 0 (Replica Set)
+  # ============================================
+  
+  shard0-primary:
+    image: mongo:7
+    container_name: mongo-shard0-primary
+    command: mongod --shardsvr --replSet shard0RS --port 27018 --dbpath /data/db
+    ports:
+      - "27022:27018"
+    volumes:
+      - shard0_primary_data:/data/db
+    networks:
+      - mongo-shard
+
+  shard0-secondary:
+    image: mongo:7
+    container_name: mongo-shard0-secondary
+    command: mongod --shardsvr --replSet shard0RS --port 27018 --dbpath /data/db
+    ports:
+      - "27023:27018"
+    volumes:
+      - shard0_secondary_data:/data/db
+    networks:
+      - mongo-shard
+
+  # ============================================
+  # SHARD 1 (Replica Set)
+  # ============================================
+  
+  shard1-primary:
+    image: mongo:7
+    container_name: mongo-shard1-primary
+    command: mongod --shardsvr --replSet shard1RS --port 27018 --dbpath /data/db
+    ports:
+      - "27024:27018"
+    volumes:
+      - shard1_primary_data:/data/db
+    networks:
+      - mongo-shard
+
+  shard1-secondary:
+    image: mongo:7
+    container_name: mongo-shard1-secondary
+    command: mongod --shardsvr --replSet shard1RS --port 27018 --dbpath /data/db
+    ports:
+      - "27025:27018"
+    volumes:
+      - shard1_secondary_data:/data/db
+    networks:
+      - mongo-shard
+
+  # ============================================
+  # MONGOS ROUTERS
+  # ============================================
+  
+  mongos1:
+    image: mongo:7
+    container_name: mongos1
+    command: mongos --configdb configRS/config1:27019,config2:27019,config3:27019 --bind_ip_all --port 27017
+    ports:
+      - "27017:27017"
+    depends_on:
+      - config1
+      - config2
+      - config3
+      - shard0-primary
+      - shard1-primary
+    networks:
+      - mongo-shard
+      - news-aggregator-network
+
+  mongos2:
+    image: mongo:7
+    container_name: mongos2
+    command: mongos --configdb configRS/config1:27019,config2:27019,config3:27019 --bind_ip_all --port 27017
+    ports:
+      - "27026:27017"
+    depends_on:
+      - config1
+      - config2
+      - config3
+      - shard0-primary
+      - shard1-primary
+    networks:
+      - mongo-shard
+      - news-aggregator-network
+
+  # ============================================
+  # INITIALIZATION CONTAINER
+  # ============================================
+  
+  mongo-init:
+    image: mongo:7
+    container_name: mongo-init
+    depends_on:
+      - config1
+      - config2
+      - config3
+      - shard0-primary
+      - shard0-secondary
+      - shard1-primary
+      - shard1-secondary
+      - mongos1
+    volumes:
+      - ./scripts/init-sharding.sh:/init-sharding.sh
+    entrypoint: ["/bin/bash", "/init-sharding.sh"]
+    networks:
+      - mongo-shard
+
+volumes:
+  config1_data:
+  config2_data:
+  config3_data:
+  shard0_primary_data:
+  shard0_secondary_data:
+  shard1_primary_data:
+  shard1_secondary_data:
+
+networks:
+  mongo-shard:
+    driver: bridge
+  news-aggregator-network:
+    external: true
