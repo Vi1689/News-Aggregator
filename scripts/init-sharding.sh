@@ -329,25 +329,22 @@ if (!appUserExists) {
     print("ℹ️ Application user already exists");
 }
 '
-
 # ============================================
 # ШАГ 9: ПРОВЕРКА И ВЫВОД ИНФОРМАЦИИ
 # ============================================
 
 echo "📋 Step 9: Verifying cluster setup..."
 
-echo ""
-echo "🔍 Checking cluster status..."
 mongosh --host mongos1:27017 --eval '
 print("=== CLUSTER STATUS ===");
 sh.status();
 
 print("\n=== SHARD DISTRIBUTION ===");
 try {
-    use news_aggregator;
-    if (db.posts.countDocuments() > 0) {
-        print("Posts collection contains " + db.posts.countDocuments() + " documents");
-        db.posts.getShardDistribution();
+    var newsDb = db.getSiblingDB("news_aggregator");
+    if (newsDb.posts.countDocuments() > 0) {
+        print("Posts collection contains " + newsDb.posts.countDocuments() + " documents");
+        newsDb.posts.getShardDistribution();
     } else {
         print("Posts collection is empty");
     }
@@ -356,10 +353,14 @@ try {
 }
 
 print("\n=== DATABASES ===");
-show dbs;
+db.adminCommand({ listDatabases: 1 }).databases.forEach(function(db) {
+    print("  " + db.name + " (" + db.sizeOnDisk + " bytes)");
+});
 
-print("\n=== CONNECTIONS ===");
-db.adminCommand({ "currentOp": 1, "$all": true }).inprog.length;
+print("\n=== SHARD LIST ===");
+db.adminCommand({ listShards: 1 }).shards.forEach(function(shard) {
+    print("  " + shard._id + ": " + shard.host);
+});
 '
 
 echo ""
