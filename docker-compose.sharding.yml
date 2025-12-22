@@ -100,7 +100,7 @@ services:
     container_name: mongos1
     command: mongos --configdb configRS/config1:27019,config2:27019,config3:27019 --bind_ip_all --port 27017
     ports:
-      - "27017:27017"
+      - "27027:27017"
     depends_on:
       - config1
       - config2
