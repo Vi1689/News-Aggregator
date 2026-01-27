@@ -1,5 +1,7 @@
 docker compose down -v --remove-orphans && docker compose build --no-cache && docker compose up
 
+docker-compose down -v --remove-orphans && docker-compose build --no-cache && docker-compose up
+
 docker compose down -v --remove-orphans
 
 docker compose build --no-cache
@@ -21,3 +23,54 @@ curl -X DELETE http://localhost:8080/api/sources/5
 curl http://localhost:8080/api/post_tags/1/3
 
 curl -X DELETE http://localhost:8080/api/post_tags/1/3
+
+
+# Войти в контейнер PostgreSQL и запустить psql
+docker exec -it postgres-master psql -U news_user -d news_db
+
+# После подключения к PostgreSQL выполни:
+\l                     # Список всех баз данных
+\dt                    # Список всех таблиц
+\d+ sources            # Структура таблицы sources
+\d+ posts              # Структура таблицы posts
+\d+ users              # Структура таблицы users
+\d+ authors            # Структура таблицы authors
+
+# Проверить данные
+SELECT * FROM sources LIMIT 10;
+SELECT COUNT(*) FROM sources;
+SELECT * FROM posts LIMIT 5;
+SELECT * FROM authors LIMIT 5;
+SELECT table_name, table_rows FROM information_schema.tables WHERE table_schema = 'public';
+
+# Проверить репликацию (в контейнере реплики)
+docker exec -it postgres-replica psql -U news_user -d news_db -c "SELECT pg_is_in_recovery();"
+docker exec -it postgres-replica psql -U news_user -d news_db -c "SELECT * FROM pg_stat_wal_receiver;"
+
+
+SELECT 'sources' as table, COUNT(*) as count FROM sources
+UNION ALL
+SELECT 'authors', COUNT(*) FROM authors
+UNION ALL
+SELECT 'posts', COUNT(*) FROM posts
+UNION ALL
+SELECT 'users', COUNT(*) FROM users
+UNION ALL
+SELECT 'tags', COUNT(*) FROM tags
+UNION ALL
+SELECT 'channels', COUNT(*) FROM channels
+UNION ALL
+SELECT 'comments', COUNT(*) FROM comments
+UNION ALL
+SELECT 'media', COUNT(*) FROM media
+UNION ALL
+SELECT 'news_texts', COUNT(*) FROM news_texts;
+
+
+
+
+
+docker exec -it mongodb mongosh -u news_app -p app_password news_aggregator
+show collections;
+db.posts.countDocuments();
+db.posts.find().limit(3).pretty();
