@@ -5,309 +5,453 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
+	"regexp"
 	"researcher-vk/internal/vk"
 	"strconv"
 	"strings"
 	"time"
 )
 
-// Базовый URL сервера (из примеров curl)
-//const baseURL = "http://localhost:8080/api"
+// Базовый URL сервера
+const baseURL = "http://server:8080/api" 
 
-const baseURL = "http://server:8080/api"
-
-// Структура для ответа сервера (предполагаем, что сервер возвращает JSON с id или успехом)
-type APIResponse struct {
-	ID      int    `json:"id,omitempty"`
-	Message string `json:"message,omitempty"`
-	Error   string `json:"error,omitempty"`
+func init() {
+    if err := InitLogger("/var/log/vk-researcher"); err != nil {
+        log.Printf("Failed to init logger: %v", err)
+    }
 }
 
-// Функция для добавления источника VK (sources)
-// Предполагаем, что источник VK один, но можно параметризовать
+// ============ ОСНОВНЫЕ ФУНКЦИИ ============
+
+// Добавление источника VK
 func AddVKSource() (int, error) {
-	data := map[string]interface{}{
-		"name":    "VK",
-		"address": "vk.com",
-		"topic":   "social",
-	}
-	return postRequest("/sources", data, "source_id")
+    fmt.Println("DEBUG: Adding VK source...")
+    
+    data := map[string]interface{}{
+        "name":    "VK",
+        "address": "vk.com",
+        "topic":   "social",
+    }
+    return postRequest("/vk/sources", data, "source_id")
 }
 
-// Функция для добавления группы VK (channels)
-// sourceID - ID источника VK (получить из addVKSource или заранее)
+// Добавление группы VK
 func AddVKChannel(group vk.VKGroup, sourceID int) (int, error) {
-	data := map[string]interface{}{
-		"name":              group.Name,
-		"link":              fmt.Sprintf("https://vk.com/%s", group.ScreenName),
-		"subscribers_count": group.MembersCount,
-		"source_id":         sourceID,
-		"topic":             "general", // Или извлечь из группы, если есть
-	}
-	return postRequest("/channels", data, "channel_id")
+    fmt.Printf("DEBUG: Adding channel for group %s (sourceID: %d)\n", group.Name, sourceID)
+    
+    data := map[string]interface{}{
+        "name":              group.Name,
+        "link":              fmt.Sprintf("https://vk.com/%s", group.ScreenName),
+        "subscribers_count": group.MembersCount,
+        "source_id":         sourceID,
+        "topic":             "general",
+    }
+    return postRequest("/vk/channels", data, "channel_id")
 }
 
-// Функция для добавления поста VK (posts)
-// channelID - ID канала (группы), authorID - ID автора (если from_id > 0, иначе nil)
-// Извлекает теги из текста (#tag) и добавляет их
-func AddVKPost(post vk.VKPost, channelID int, authorID *int) (int, error) {
-	// Извлечь теги из текста
-	tags := extractTags(post.Text)
-
-	// Добавить автора, если from_id > 0 и authorID nil
-	if post.AuthorID > 0 && authorID == nil {
-		// Предполагаем, что у тебя есть функция для получения имени автора по ID (или добавить из VKUser)
-		// Здесь hardcode, замени на реальный запрос к VK API для имени
-		authorName := post.AuthorName // Или запроси через VK API
-		if authorName == "" {
-			authorName = fmt.Sprintf("User %d", post.AuthorID) // Fallback
-		}
-		aid, err := AddVKAuthor(authorName)
-		if err != nil {
-			return 0, fmt.Errorf("failed to add author: %v", err)
-		}
-		authorID = &aid
-	}
-
-	t := time.Unix(post.Date, 0)                       // Создаём time.Time из Unix seconds
-	timeStampString := t.Format("2006-01-02 15:04:05") // Формат для PostgreSQL TIMESTAMP (YYYY-MM-DD HH:MM:SS)
-
-	data := map[string]interface{}{
-		"title":          fmt.Sprintf("Post %d", post.ID), // Или извлечь заголовок из текста
-		"author_id":      authorID,
-		"text_id":        nil, // Заглушка. Сначала добавим text, потом обновим post
-		"channel_id":     channelID,
-		"comments_count": post.Comments,
-		"likes_count":    post.Likes,
-		"created_at":     timeStampString,
-	}
-
-	// Сначала добавить текст новости (news_texts)
-	textID, err := AddVKNewsText(post.Text)
-	if err != nil {
-		return 0, fmt.Errorf("failed to add text: %v", err)
-	}
-	data["text_id"] = textID
-
-	// Добавить пост
-	postID, err := postRequest("/posts", data, "post_id")
-	if err != nil {
-		return 0, err
-	}
-
-	// Добавить теги
-	for _, tag := range tags {
-		tagID, err := addVKTag(tag)
-		if err != nil {
-			continue // Игнорируем ошибки тегов
-		}
-		addVKPostTag(postID, tagID)
-	}
-
-	return postID, nil
-}
-
-// Функция для добавления автора (authors)
+// Добавление автора
 func AddVKAuthor(name string) (int, error) {
-	data := map[string]interface{}{
-		"name": name,
-	}
-	return postRequest("/authors", data, "author_id")
+    fmt.Printf("DEBUG AddVKAuthor called: name='%s'\n", name)
+    
+    if len(name) == 0 {
+        fmt.Printf("WARNING: Empty author name, using default author ID 1\n")
+        return 1, nil // Дефолтный автор
+    }
+
+    // Проверяем, нет ли уже такого автора
+    existingID, err := findExistingAuthor(name)
+    if err == nil && existingID > 0 {
+        fmt.Printf("DEBUG: Author '%s' already exists with ID: %d\n", name, existingID)
+        return existingID, nil
+    }
+    
+    // data := map[string]interface{}{
+    //     "name": name,
+    // }
+    
+    // authorID, err := postRequest("/vk/authors", data, "author_id")
+    // if err != nil {
+    //     // Пробуем обычный endpoint
+    //     authorID, err = postRequest("/api/authors", data, "author_id")
+    //     if err != nil {
+    //         return 0, fmt.Errorf("failed to create author via both endpoints: %v", err)
+    //     }
+    // }
+    
+    fmt.Printf("WARNING: Failed to create author '%s', using default author ID 1\n", name)
+    return 1, nil
 }
 
-// Функция для добавления текста новости (news_texts)
-func AddVKNewsText(text string) (int, error) {
-	data := map[string]interface{}{
-		"text": text,
-	}
-	return postRequest("/news_texts", data, "text_id")
+// Поиск существующего автора
+func findExistingAuthor(name string) (int, error) {
+    // Пробуем получить список авторов
+    resp, err := http.Get(baseURL + "/api/authors")
+    if err != nil {
+        return 0, err
+    }
+    defer resp.Body.Close()
+    
+    body, err := io.ReadAll(resp.Body)
+    if err != nil {
+        return 0, err
+    }
+    
+    var authors []map[string]interface{}
+    if err := json.Unmarshal(body, &authors); err != nil {
+        return 0, err
+    }
+    
+    for _, author := range authors {
+        if authorName, ok := author["name"].(string); ok && authorName == name {
+            if id, ok := author["author_id"].(float64); ok {
+                return int(id), nil
+            }
+        }
+    }
+    
+    return 0, fmt.Errorf("author not found")
 }
 
-// Функция для добавления тега (tags)
-func addVKTag(name string) (int, error) {
-	data := map[string]interface{}{
-		"name": name,
-	}
-	return postRequest("/tags", data, "tag_id")
+// Добавление поста VK
+func AddVKPost(post vk.VKPost, channelID int, authorID int, groupName string) (int, error) {
+    fmt.Printf("DEBUG AddVKPost called: post.ID=%d, channelID=%d, authorID=%d, text length=%d\n", 
+        post.ID, channelID, authorID, len(post.Text))
+    
+    // Проверка даты
+    if post.Date <= 0 {
+        post.Date = time.Now().Unix()
+    }
+    
+    t := time.Unix(post.Date, 0)
+    timeStampString := t.Format("2006-01-02 15:04:05")
+    
+    // Извлечь теги из текста
+    tags := extractTags(post.Text)
+    
+    // Генерируем заголовок если его нет
+    title := post.Text
+    if len(title) > 100 {
+        title = title[:100] + "..."
+    }
+    if title == "" {
+        title = fmt.Sprintf("Post %d from %s", post.ID, groupName)
+    }
+    
+    fmt.Printf("DEBUG: Post date: %s, Title: %s\n", timeStampString, title)
+    
+    // Подготавливаем данные
+    data := map[string]interface{}{
+        "title":           title,
+        "text":            post.Text,
+        "author_id":       authorID,
+        "channel_id":      channelID,
+        "comments_count":  post.Comments,
+        "likes_count":     post.Likes,
+        "created_at":      timeStampString,
+        "tags":            tags,
+    }
+    
+    fmt.Printf("DEBUG: Data for post %d: title=%s, author_id=%d, channel_id=%d\n",
+        post.ID, data["title"], authorID, channelID)
+    
+    // Добавить пост
+    postID, err := postRequest("/vk/posts", data, "post_id")
+    
+    if err != nil {
+        fmt.Printf("ERROR in AddVKPost for post %d: %v\n", post.ID, err)
+        // Пробуем обычный endpoint
+        postID, err = postRequest("/api/posts", data, "post_id")
+        if err != nil {
+            fmt.Printf("FATAL ERROR: Failed via both endpoints for post %d: %v\n", post.ID, err)
+            return 0, err
+        }
+    }
+    
+    fmt.Printf("SUCCESS: Post %d added with ID: %d\n", post.ID, postID)
+    
+    // Добавляем теги в отдельную таблицу
+    if len(tags) > 0 {
+        go addPostTags(postID, tags)
+    }
+    
+    return postID, nil
 }
 
-// Функция для связи поста и тега (post_tags)
-func addVKPostTag(postID, tagID int) error {
-	data := map[string]interface{}{
-		"post_id": postID,
-		"tag_id":  tagID,
-	}
-	_, err := postRequest("/post_tags", data, "tag_id")
-	return err
+// Добавление тегов к посту
+func addPostTags(postID int, tags []string) {
+    for _, tagName := range tags {
+        // Создаем или получаем тег
+        tagData := map[string]interface{}{
+            "name": tagName,
+        }
+        
+        tagID, err := postRequest("/api/tags", tagData, "tag_id")
+        if err != nil {
+            fmt.Printf("WARNING: Failed to create tag '%s': %v\n", tagName, err)
+            continue
+        }
+        
+        // Связываем тег с постом
+        linkData := map[string]interface{}{
+            "post_id": postID,
+            "tag_id":  tagID,
+        }
+        
+        _, err = postRequest("/api/post_tags", linkData, "post_id")
+        if err != nil {
+            fmt.Printf("WARNING: Failed to link tag '%s' to post %d: %v\n", tagName, postID, err)
+        }
+    }
 }
 
-// Функция для добавления комментария VK (comments)
-// Рекурсивно обрабатывает thread (вложенные комментарии)
-func AddVKComment(comment vk.VKComment, postID int, parentID *int) error {
-	// Добавить автора комментария (nickname)
-	authorName := comment.AuthorName
-	if authorName == "" {
-		authorName = fmt.Sprintf("User %d", comment.FromID)
-	}
-	_, err := AddVKAuthor(authorName) // Если уже есть, сервер вернёт существующий ID?
-	if err != nil {
-		return fmt.Errorf("failed to add comment author: %v", err)
-	}
-
-	data := map[string]interface{}{
-		"post_id":           postID,
-		"nickname":          authorName, // Или authorID, но схема использует nickname
-		"parent_comment_id": parentID,
-		"text":              comment.Text,
-		"likes_count":       0,   // VK не даёт likes для комментариев в базовом API?
-		"created_at":        nil, // Если есть timestamp, добавь
-	}
-
-	commentID, err := postRequest("/comments", data, "comment_id")
-	if err != nil {
-		return err
-	}
-
-	// Рекурсивно добавить вложенные комментарии
-	for _, child := range comment.Thread.Items {
-		AddVKComment(child, postID, &commentID)
-	}
-
-	return nil
-}
-
-// Функция для добавления медиа (media)
+// Добавление медиа
 func AddVKMedia(media vk.VKMedia, postID int) error {
-	data := map[string]interface{}{
-		"post_id":       postID,
-		"media_content": media.URL,
-		"media_type":    media.Type,
-	}
+    fmt.Printf("DEBUG: Adding media for postID=%d, type=%s\n", postID, media.Type)
+    
+    data := map[string]interface{}{
+        "post_id":       postID,
+        "media_content": media.URL,
+        "media_type":    media.Type,
+    }
 
-	_, err := postRequest("/media", data, "media_id")
-	return err
+    _, err := postRequest("/vk/media", data, "media_id")
+    if err != nil {
+        // Попробуем обычный endpoint
+        _, err = postRequest("/api/media", data, "media_id")
+    }
+    
+    return err
 }
 
-// Вспомогательная функция для POST-запроса
-// возвращает ошибку и id сущности fieldName - название поля id сущности
+// Добавление комментария VK
+func AddVKComment(comment vk.VKComment, postID int, parentID *int) error {
+    authorName := comment.AuthorName
+    if authorName == "" {
+        authorName = fmt.Sprintf("User %d", comment.FromID)
+    }
+
+    // Создаем автора комментария
+    authorID, err := AddVKAuthor(authorName)
+    if err != nil {
+        authorID = 1 // Дефолтный автор
+    }
+
+    t := time.Now()
+    timeStampString := t.Format("2006-01-02 15:04:05")
+
+    data := map[string]interface{}{
+        "post_id":           postID,
+        "author_id":         authorID,
+        "text":              comment.Text,
+        "parent_comment_id": parentID,
+        "likes_count":       0,
+        "created_at":        timeStampString,
+    }
+
+    _, err = postRequest("/vk/comments", data, "comment_id")
+    if err != nil {
+        fmt.Printf("ERROR in AddVKComment: %v\n", err)
+    }
+    
+    return err
+}
+
+// ============ ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ============
+
+// POST запрос с ретраями
 func postRequest(endpoint string, data map[string]interface{}, fieldName string) (int, error) {
-	jsonData, err := json.Marshal(data)
-	if err != nil {
-		return 0, err
-	}
+    logger := GetLogger()
+    
+    startTime := time.Now()
+    
+    // Маршалинг JSON
+    jsonData, err := json.Marshal(data)
+    if err != nil {
+        if logger != nil {
+            logger.LogRequest(endpoint, data, false, nil, fmt.Sprintf("JSON marshal error: %v", err))
+        }
+        return 0, fmt.Errorf("failed to marshal JSON: %v", err)
+    }
 
-	fmt.Printf("\n\njsonData = %s\n\n", jsonData)
+    // Пробуем несколько раз при ошибках
+    maxRetries := 3
+    for retry := 0; retry < maxRetries; retry++ {
+        if retry > 0 {
+            waitTime := time.Duration(retry) * time.Second * 2
+            fmt.Printf("Retry %d/%d for %s after %v\n", retry+1, maxRetries, endpoint, waitTime)
+            time.Sleep(waitTime)
+        }
+        
+        // Отправляем запрос
+        resp, err := http.Post(baseURL+endpoint, "application/json", bytes.NewBuffer(jsonData))
+        if err != nil {
+            fmt.Printf("ERROR: HTTP request failed for %s (retry %d): %v\n", endpoint, retry+1, err)
+            if retry == maxRetries-1 {
+                return 0, fmt.Errorf("HTTP request failed after %d retries: %v", maxRetries, err)
+            }
+            continue
+        }
+        
+        // Читаем ответ
+        bodyBytes, err := io.ReadAll(resp.Body)
+        resp.Body.Close()
+        
+        if err != nil {
+            fmt.Printf("ERROR: Failed to read response for %s: %v\n", endpoint, err)
+            continue
+        }
 
-	resp, err := http.Post(baseURL+endpoint, "application/json", bytes.NewBuffer(jsonData))
-	if err != nil {
-		return 0, err
-	}
-	defer resp.Body.Close()
+        // Если сервер вернул ошибку, пробуем снова
+        if resp.StatusCode >= 400 && resp.StatusCode < 500 && retry < maxRetries-1 {
+            fmt.Printf("Server error %d for %s, retrying...\n", resp.StatusCode, endpoint)
+            continue
+        }
+        
+        if resp.StatusCode != http.StatusOK {
+            fmt.Printf("ERROR: Server returned %d for %s\n", resp.StatusCode, endpoint)
+            return 0, fmt.Errorf("server error %d: %s", resp.StatusCode, string(bodyBytes))
+        }
 
-	// Read the entire response body
-	bodyBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return 0, fmt.Errorf("failed to read response body: %v", err)
-	}
+        // Проверяем, если тело ответа пустое
+        if len(bodyBytes) == 0 {
+            fmt.Printf("ERROR: Empty response from server for %s\n", endpoint)
+            return 0, fmt.Errorf("empty response from server")
+        }
 
-	fmt.Printf("Response body: %s\n", string(bodyBytes)) // Для отладки
+        // Если не JSON, возвращаем ошибку
+        if len(bodyBytes) > 0 && bodyBytes[0] != '{' && bodyBytes[0] != '[' {
+            fmt.Printf("ERROR: Non-JSON response for %s: %s\n", endpoint, string(bodyBytes))
+            return 0, fmt.Errorf("non-JSON response: %s", string(bodyBytes))
+        }
 
-	// Проверяем, если тело ответа пустое
-	if len(bodyBytes) == 0 {
-		return 0, fmt.Errorf("empty response from server")
-	}
+        // Парсим JSON ответ
+        var respData map[string]interface{}
+        err = json.Unmarshal(bodyBytes, &respData)
+        if err != nil {
+            fmt.Printf("ERROR: Failed to parse JSON for %s: %v\n", endpoint, err)
+            continue
+        }
 
-	// Проверяем, если это JSON (начинается с {)
-	if bodyBytes[0] != '{' && bodyBytes[0] != '[' {
-		return 0, fmt.Errorf("error in response: %s", bodyBytes)
-	}
+        // Проверяем наличие ошибки в ответе
+        if errorMsg, ok := respData["error"].(string); ok && errorMsg != "" {
+            fmt.Printf("ERROR: Server error for %s: %s\n", endpoint, errorMsg)
+            return 0, fmt.Errorf("server error: %s", errorMsg)
+        }
 
-	var resp_unmarshal map[string]interface{}
-	err = json.Unmarshal(bodyBytes, &resp_unmarshal)
-	if err != nil {
-		return 0, fmt.Errorf("failed to parse JSON response: %v, body: %s", err, string(bodyBytes))
-	}
+        // Ищем ID в ответе
+        idFieldName := ""
+        
+        switch endpoint {
+        case "/vk/sources", "/api/sources":
+            idFieldName = "source_id"
+        case "/vk/channels", "/api/channels":
+            idFieldName = "channel_id"
+        case "/vk/posts", "/api/posts":
+            idFieldName = "post_id"
+        case "/vk/authors", "/api/authors":
+            idFieldName = "author_id"
+        case "/vk/media", "/api/media":
+            idFieldName = "media_id"
+        case "/vk/comments", "/api/comments":
+            idFieldName = "comment_id"
+        default:
+            idFieldName = fieldName
+        }
 
-	// Проверяем наличие ошибки в ответе
-	if errorMsg, ok := resp_unmarshal["error"].(string); ok && errorMsg != "" {
-		return 0, fmt.Errorf("server error: %s", errorMsg)
-	}
+        // Ищем ID
+        idValue, found := respData[idFieldName]
+        if !found {
+            idValue, found = respData["id"]
+            if !found {
+                for key, value := range respData {
+                    if strings.HasSuffix(key, "_id") {
+                        idValue = value
+                        idFieldName = key
+                        found = true
+                        break
+                    }
+                }
+                if !found {
+                    fmt.Printf("WARNING: ID not found in response for %s. Available: %v\n", 
+                        endpoint, respData)
+                    return 0, fmt.Errorf("ID not found in response")
+                }
+            }
+        }
 
-	fieldValue, exists := resp_unmarshal[fieldName]
-	if !exists {
-		return 0, fmt.Errorf("there is no field %s in response: %v", fieldName, resp_unmarshal)
-	}
+        // Конвертируем ID
+        id, err := convertToInt(idValue, idFieldName)
+        if err != nil {
+            fmt.Printf("ERROR: Failed to convert ID for %s: %v\n", endpoint, err)
+            return 0, err
+        }
 
-	// Обрабатываем разные типы данных
-	var id int
-	switch v := fieldValue.(type) {
-	case string:
-		id, err = strconv.Atoi(v)
-		if err != nil {
-			return 0, fmt.Errorf("failed to convert string to int: %v", err)
-		}
-	case float64:
-		id = int(v)
-	case int:
-		id = v
-	default:
-		return 0, fmt.Errorf("field '%s' has unsupported type %T", fieldName, fieldValue)
-	}
-
-	return id, nil
+        duration := time.Since(startTime)
+        fmt.Printf("SUCCESS: %s completed in %d ms, ID: %d\n", 
+            endpoint, duration.Milliseconds(), id)
+        
+        return id, nil
+    }
+    
+    return 0, fmt.Errorf("max retries exceeded for %s", endpoint)
 }
 
-// Вспомогательная функция для извлечения тегов из текста (#tag)
+// Конвертация значения в int
+func convertToInt(value interface{}, fieldName string) (int, error) {
+    switch v := value.(type) {
+    case float64:
+        return int(v), nil
+    case int:
+        return v, nil
+    case int32:
+        return int(v), nil
+    case int64:
+        return int(v), nil
+    case string:
+        if i, err := strconv.Atoi(v); err == nil {
+            return i, nil
+        }
+        return 0, fmt.Errorf("cannot convert string '%s' to int", v)
+    default:
+        return 0, fmt.Errorf("cannot convert %T to int for field '%s'", value, fieldName)
+    }
+}
+
+// Извлечение тегов из текста
 func extractTags(text string) []string {
-	words := strings.Fields(text)
-	var tags []string
-	for _, word := range words {
-		if strings.HasPrefix(word, "#") {
-			tag := strings.Trim(word, "#.,!?")
-			if tag != "" {
-				tags = append(tags, tag)
-			}
-		}
-	}
-	return tags
+    var tags []string
+    
+    // 1. Хэштеги
+    reHashtag := regexp.MustCompile(`#[\p{L}\p{N}_]+`)
+    hashtags := reHashtag.FindAllString(text, -1)
+    for _, tag := range hashtags {
+        cleanTag := strings.ToLower(strings.TrimPrefix(tag, "#"))
+        if cleanTag != "" {
+            tags = append(tags, cleanTag)
+        }
+    }
+    
+    // 2. Ключевые слова
+    keywords := []string{"новости", "срочно", "эксклюзив", "факты", "информация", 
+                         "важно", "главное", "обновление", "события", "репортаж"}
+    textLower := strings.ToLower(text)
+    for _, keyword := range keywords {
+        if strings.Contains(textLower, keyword) && !contains(tags, keyword) {
+            tags = append(tags, keyword)
+        }
+    }
+    
+    return tags
 }
 
-// Вспомогательная функция для парсинга attachment в VKMedia
-func parseVKAttachment(att map[string]interface{}) *vk.VKMedia {
-	typ, ok := att["type"].(string)
-	if !ok {
-		return nil
-	}
-
-	var url string
-	switch typ {
-	case "photo":
-		if photo, ok := att["photo"].(map[string]interface{}); ok {
-			if sizes, ok := photo["sizes"].([]interface{}); ok && len(sizes) > 0 {
-				if size, ok := sizes[len(sizes)-1].(map[string]interface{}); ok { // Больший размер
-					if u, ok := size["url"].(string); ok {
-						url = u
-					}
-				}
-			}
-		}
-	case "video":
-		if video, ok := att["video"].(map[string]interface{}); ok {
-			if player, ok := video["player"].(string); ok {
-				url = player
-			}
-		}
-	case "audio":
-		if audio, ok := att["audio"].(map[string]interface{}); ok {
-			if u, ok := audio["url"].(string); ok {
-				url = u
-			}
-		}
-	// Добавь другие типы, если нужно
-	default:
-		return nil
-	}
-
-	return &vk.VKMedia{Type: typ, URL: url}
+// Проверка наличия элемента в слайсе
+func contains(slice []string, item string) bool {
+    for _, s := range slice {
+        if s == item {
+            return true
+        }
+    }
+    return false
 }

@@ -142,6 +142,27 @@ services:
       - ./config/researchers.xml:/usr/local/etc/reddit-researcher/test_conf.xml
       - ./researchers/reddit/access_data:/usr/local/etc/reddit-researcher/access_data
       - ./researchers/reddit/token_cache.json:/usr/local/etc/reddit-researcher/token_cache.json
+
+  data-generator:
+    build:
+      context: ./data-generator
+      dockerfile: Dockerfile
+    container_name: data-generator
+    depends_on:
+      server:
+        condition: service_healthy
+    environment:
+      - API_URL=http://server:8080
+      - BATCH_SIZE=3
+      - DELAY_BETWEEN_RUNS=45
+      - MAX_CYCLES=0
+      - LOG_LEVEL=info
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://server:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
   
   # Backup сервис
   backup:

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<config>
+    <source name="Vkontakte"> 
+        <channel_limit> 3 </channel_limit> 
+        <post_limit> 20 </post_limit> 
+        <comment_limit> 100 </comment_limit>
+        <media_limit> 30 </media_limit>
+        <preferred_channels>
+            <channel>программирование</channel>
+            <channel>технологии</channel>
+            <channel>новости</channel>
+            <channel>it</channel>
+            <channel>наука</channel>
+        </preferred_channels>
+        <research_period> 120 </research_period>
+    </source>
+</config>
