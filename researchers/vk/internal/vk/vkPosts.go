@@ -12,21 +12,21 @@ import (
 	"time"
 )
 
-// Расширенная структура для поста
+// Структура поста
 type VKPost struct {
 	ID          int                      `json:"id"`
 	Text        string                   `json:"text"`
-	Date        int64                    `json:"date"` // Unix timestamp
+	Date        int64                    `json:"date"`
 	Likes       int                      `json:"likes_count"`
 	Reposts     int                      `json:"reposts_count"`
 	Comments    int                      `json:"comments_count"`
-	AuthorID    int                      `json:"from_id"` // ID автора (пользователь или группа)
-	AuthorName  string                   // Имя автора (заполнится автоматически)
-	Attachments []map[string]interface{} `json:"attachments,omitempty"` // Добавлено: массив вложений (фото, видео и т.д.)
-	Tags        []string                 // Добавлено: массив хэштегов (извлекается из текста)
+	AuthorID    int                      `json:"from_id"`
+	AuthorName  string                   
+	Attachments []map[string]interface{} `json:"attachments,omitempty"`
+	Tags        []string                 
 }
 
-// Структура ответа от VK API для wall.get с extended=1
+// Структура ответа
 type VKWallResponse struct {
 	Response struct {
 		Count    int      `json:"count"`
@@ -43,124 +43,216 @@ type VKWallResponse struct {
 	} `json:"response"`
 }
 
-// Функция для извлечения хэштегов из текста
+// Извлечение тегов
 func extractTags(text string) []string {
-	re := regexp.MustCompile(`#\w+`)
+	re := regexp.MustCompile(`#[\p{L}\p{N}_]+`)
 	matches := re.FindAllString(text, -1)
 	var tags []string
 	for _, match := range matches {
-		// Убираем # и приводим к нижнему регистру для нормализации
-		tag := strings.TrimPrefix(match, "#")
-		tags = append(tags, strings.ToLower(tag))
+		tag := strings.ToLower(strings.TrimPrefix(match, "#"))
+		if tag != "" && !contains(tags, tag) {
+			tags = append(tags, tag)
+		}
 	}
 	return tags
 }
 
-// Функция для получения заданного количества постов группы
-func GetGroupPosts(accessToken string, groupID int, count int) ([]VKPost, error) {
-	if count <= 0 {
-		return []VKPost{}, nil // Пустой слайс, если count <= 0
+// Проверка наличия в слайсе
+func contains(slice []string, item string) bool {
+	for _, s := range slice {
+		if s == item {
+			return true
+		}
 	}
+	return false
+}
 
-	// Максимум 100 постов на запрос
-	const maxPerRequest = 100
-	var allPosts []VKPost
-	offset := 0
+// Получение постов с ретраями
+func GetGroupPostsWithRetry(accessToken string, groupID int, count int) ([]VKPost, error) {
+    fmt.Printf("DEBUG GetGroupPostsWithRetry: groupID=%d, count=%d\n", groupID, count)
+    
+    if count <= 0 {
+        return []VKPost{}, nil
+    }
 
-	// Цикл для пагинации
-	for offset < count {
-		// Сколько брать в этом запросе
-		currentCount := maxPerRequest
-		if remaining := count - offset; remaining < maxPerRequest {
-			currentCount = remaining
-		}
+    // Ограничиваем count для избежания Flood Control
+    if count > 50 {
+        count = 50
+        fmt.Printf("Reducing post count to %d to avoid flood control\n", count)
+    }
 
-		// Базовый URL VK API
-		baseURL := "https://api.vk.com/method/wall.get"
+    const maxPerRequest = 20 // Меньше запросов за раз
+    var allPosts []VKPost
+    offset := 0
 
-		// Параметры запроса
-		params := url.Values{}
-		params.Set("access_token", accessToken)
-		params.Set("v", "5.131")                          // Версия API
-		params.Set("owner_id", "-"+strconv.Itoa(groupID)) // ID группы с минусом
-		params.Set("count", strconv.Itoa(currentCount))
-		params.Set("offset", strconv.Itoa(offset))
-		params.Set("extended", "1")                       // Расширенная информация
-		params.Set("fields", "first_name,last_name,name") // Поля для профилей и групп
+    // Цикл для пагинации
+    for offset < count {
+        currentCount := maxPerRequest
+        if remaining := count - offset; remaining < maxPerRequest {
+            currentCount = remaining
+        }
 
-		// Формируем полный URL
-		fullURL := baseURL + "?" + params.Encode()
-		fmt.Printf("Запрос: %s (offset: %d, count: %d)\n", fullURL, offset, currentCount) // Отладка
+        // Пробуем несколько раз при ошибках
+        var posts []VKPost
+        var err error
+        
+for retry := 0; retry < 3; retry++ {
+    if retry > 0 {
+        waitTime := time.Duration(retry) * time.Second * 10 // Увеличить с 5 до 10 секунд
+        fmt.Printf("Retry %d for group %d, waiting %v\n", retry+1, groupID, waitTime)
+        time.Sleep(waitTime)
+    }
+    
+    posts, err = getPostsPage(accessToken, groupID, currentCount, offset)
+    if err != nil {
+        if strings.Contains(err.Error(), "Flood control") {
+            fmt.Printf("Flood control detected, waiting 30 seconds...\n")
+            time.Sleep(30 * time.Second) // Добавить большую паузу при flood control
+            if retry < 2 {
+                continue
+            }
+            return allPosts, fmt.Errorf("flood control")
+        }
+        return allPosts, err
+    }
+    break
+}
+        
+        if err != nil {
+            return allPosts, err
+        }
 
-		// Задаём таймаут
-		client := &http.Client{
-			Timeout: 30 * time.Second,
-		}
+        // Заполняем имена авторов (переименовали функцию)
+        fillPostAuthorNames(posts, groupID)
 
-		// Делаем HTTP GET запрос
-		resp, err := client.Get(fullURL)
-		if err != nil {
-			return nil, fmt.Errorf("ошибка запроса к VK API: %w", err)
-		}
-		defer resp.Body.Close()
+        // Добавляем посты в общий слайс
+        allPosts = append(allPosts, posts...)
 
-		// Проверяем статус ответа
-		if resp.StatusCode != http.StatusOK {
-			body, _ := io.ReadAll(resp.Body)
-			return nil, fmt.Errorf("VK API вернул ошибку: %s, тело: %s", resp.Status, string(body))
-		}
+        // Если постов меньше, чем запрошено, выходим
+        if len(posts) < currentCount {
+            break
+        }
 
-		// Читаем и парсим JSON
-		body, err := io.ReadAll(resp.Body)
-		fmt.Printf("GetGroupPosts body = %s...\n\n", body[:100])
-		if err != nil {
-			return nil, fmt.Errorf("ошибка чтения ответа: %w", err)
-		}
+        // Увеличиваем offset
+        offset += currentCount
 
-		var vkResp VKWallResponse
-		if err := json.Unmarshal(body, &vkResp); err != nil {
-			return nil, fmt.Errorf("ошибка парсинга JSON: %w", err)
-		}
+        // Пауза между запросами
+        time.Sleep(1 * time.Second)
+    }
 
-		// Создаём мапы для имён: профили (положительные ID) и группы (отрицательные ID)
-		profilesMap := make(map[int]string)
-		for _, p := range vkResp.Response.Profiles {
-			profilesMap[p.ID] = p.FirstName + " " + p.LastName
-		}
-		groupsMap := make(map[int]string)
-		for _, g := range vkResp.Response.Groups {
-			groupsMap[-g.ID] = g.Name // Группы имеют отрицательные ID в from_id
-		}
+    fmt.Printf("DEBUG: Total posts retrieved: %d\n", len(allPosts))
+    return allPosts, nil
+}
 
-		// Заполняем AuthorName и Tags для каждого поста
-		for i := range vkResp.Response.Items {
-			post := &vkResp.Response.Items[i]
-			if name, ok := profilesMap[post.AuthorID]; ok {
-				post.AuthorName = name
-			} else if name, ok := groupsMap[post.AuthorID]; ok {
-				post.AuthorName = name
-			} else {
-				post.AuthorName = "Неизвестный автор" // Если не найден
-			}
-			//post.Date = time.Unix(post.Date, 0)
-			// Извлекаем теги из текста
-			post.Tags = extractTags(post.Text)
-		}
+// Получение одной страницы постов
+func getPostsPage(accessToken string, groupID int, count, offset int) ([]VKPost, error) {
+    baseURL := "https://api.vk.com/method/wall.get"
 
-		// Добавляем посты в общий слайс
-		allPosts = append(allPosts, vkResp.Response.Items...)
+    // ВАЖНО: Для групп owner_id должен быть отрицательным!
+    ownerID := "-" + strconv.Itoa(groupID)
+    
+    params := url.Values{}
+    params.Set("access_token", accessToken)
+    params.Set("v", "5.199") // Обновленная версия API
+    params.Set("owner_id", ownerID)
+    params.Set("count", strconv.Itoa(count))
+    params.Set("offset", strconv.Itoa(offset))
+    params.Set("extended", "1")
+    params.Set("fields", "first_name,last_name,name")
 
-		// Если постов меньше, чем запрошено, выходим
-		if len(vkResp.Response.Items) < currentCount {
-			break
-		}
+    fullURL := baseURL + "?" + params.Encode()
+    
+    // ДОБАВИМ ПОДРОБНУЮ ОТЛАДКУ
+    fmt.Printf("DEBUG getPostsPage: owner_id=%s, groupID=%d\n", ownerID, groupID)
+    
+    client := &http.Client{
+        Timeout: 30 * time.Second,
+    }
 
-		// Увеличиваем offset
-		offset += currentCount
+    resp, err := client.Get(fullURL)
+    if err != nil {
+        fmt.Printf("ERROR getPostsPage HTTP: %v\n", err)
+        return nil, fmt.Errorf("HTTP request error: %w", err)
+    }
+    defer resp.Body.Close()
 
-		// Небольшая пауза между запросами (чтобы не превысить лимиты VK)
-		time.Sleep(100 * time.Millisecond)
-	}
+    // Читаем ответ
+    body, err := io.ReadAll(resp.Body)
+    if err != nil {
+        fmt.Printf("ERROR getPostsPage read body: %v\n", err)
+        return nil, fmt.Errorf("read response error: %w", err)
+    }
 
-	return allPosts, nil
+    // Выводим ответ для отладки (без токена)
+    fmt.Printf("DEBUG getPostsPage response (%d bytes): %s\n", 
+        len(body), 
+        string(body[:minInt(500, len(body))]) + "...")
+
+    if resp.StatusCode != http.StatusOK {
+        fmt.Printf("ERROR getPostsPage status %d: %s\n", resp.StatusCode, string(body))
+        return nil, fmt.Errorf("VK API error %d: %s", resp.StatusCode, string(body))
+    }
+
+    // Парсим JSON
+    var vkResp VKWallResponse
+    if err := json.Unmarshal(body, &vkResp); err != nil {
+        // Проверяем на специфические ошибки VK
+        responseStr := string(body)
+        if strings.Contains(responseStr, "Flood control") {
+            fmt.Printf("ERROR getPostsPage: Flood control detected\n")
+            return nil, fmt.Errorf("flood control")
+        }
+        if strings.Contains(responseStr, "error") {
+            // Извлекаем ошибку из JSON
+            var errorResp struct {
+                Error struct {
+                    ErrorCode int    `json:"error_code"`
+                    ErrorMsg  string `json:"error_msg"`
+                } `json:"error"`
+            }
+            if json.Unmarshal(body, &errorResp) == nil {
+                fmt.Printf("ERROR getPostsPage VK API: Code=%d, Message=%s\n", 
+                    errorResp.Error.ErrorCode, errorResp.Error.ErrorMsg)
+                return nil, fmt.Errorf("VK API error %d: %s", 
+                    errorResp.Error.ErrorCode, errorResp.Error.ErrorMsg)
+            }
+        }
+        fmt.Printf("ERROR getPostsPage JSON parse: %v\n", err)
+        return nil, fmt.Errorf("JSON parse error: %w", err)
+    }
+
+    // Проверяем ответ
+    fmt.Printf("DEBUG getPostsPage: response count=%d, items=%d\n", 
+        vkResp.Response.Count, len(vkResp.Response.Items))
+    
+    // Если count = 0, это может означать что стена закрыта или нет постов
+    if vkResp.Response.Count == 0 {
+        fmt.Printf("WARNING getPostsPage: Wall is empty or closed for group %d\n", groupID)
+    }
+
+    return vkResp.Response.Items, nil
+}
+
+func minInt(a, b int) int {
+    if a < b {
+        return a
+    }
+    return b
+}
+
+// Заполнение имен авторов для постов (переименованная функция)
+func fillPostAuthorNames(posts []VKPost, groupID int) {
+    for i := range posts {
+        // Для групп автором является сама группа
+        posts[i].AuthorID = -groupID
+        posts[i].AuthorName = fmt.Sprintf("VK Group %d", groupID)
+        
+        // Извлекаем теги
+        posts[i].Tags = extractTags(posts[i].Text)
+        
+        // Если текст пустой, пропускаем
+        if posts[i].Text == "" {
+            posts[i].Text = fmt.Sprintf("Post %d from group %d", posts[i].ID, groupID)
+        }
+    }
 }

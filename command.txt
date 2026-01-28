@@ -67,6 +67,15 @@ UNION ALL
 SELECT 'news_texts', COUNT(*) FROM news_texts;
 
 
+SELECT 
+    c.channel_id,
+    c.name AS channel_name,
+    c.link,
+    c.subscribers_count,
+    s.name AS source_name
+FROM channels c
+LEFT JOIN sources s ON c.source_id = s.source_id;
+
 
 
 

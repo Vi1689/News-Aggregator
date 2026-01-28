@@ -1,7 +1,4 @@
 <?xml version="1.0" encoding="UTF-8"?>
-
-<!--Этот файл содержит конфигурацию для researchers. Этот файл обновляет сервер.-->
-
 <config>
     <source name="Reddit"> 
         <channel_limit> 20 </channel_limit> 
@@ -13,11 +10,12 @@
     </source>
 
     <source name="Vkontakte"> 
-        <channel_limit> 1 </channel_limit> 
-        <post_limit> 2 </post_limit> 
-        <comment_limit> 1 </comment_limit>
-        <media_limit> 1 </media_limit>
-        <preferred_channels></preferred_channels>
-        <research_period> 1 </research_period>
+        <channel_limit> 3 </channel_limit> 
+        <post_limit> 10 </post_limit> 
+        <comment_limit> 5 </comment_limit>
+        <media_limit> 5 </media_limit>
+        <!-- Используем реальные популярные группы VK -->
+        <preferred_channels>habr,rian_ru,tass_agency,meduzaproject,lentach,rt_russian</preferred_channels>
+        <research_period> 60 </research_period>
     </source>
 </config>
