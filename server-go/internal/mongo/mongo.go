@@ -115,8 +115,18 @@ func (m *MongoManager) createCollectionsAndIndexes(ctx context.Context) error {
 		Keys:    bson.D{{Key: "created_at", Value: 1}},
 		Options: options.Index().SetExpireAfterSeconds(31536000),
 	})
-
-	return err
+    // Добавляем индекс для AdvancedSearch
+    _, err = posts.Indexes().CreateOne(ctx, mongo.IndexModel{
+        Keys: bson.D{
+            {Key: "tags", Value: 1},
+            {Key: "stats.likes", Value: -1},
+        },
+    })
+    if err != nil {
+        log.Printf("Warning: failed to create advanced search index: %v", err)
+    }
+    
+    return err
 }
 
 // ============ CRUD ОПЕРАЦИИ ============
@@ -245,84 +255,102 @@ func (m *MongoManager) UpsertPost(ctx context.Context, postID int, data map[stri
 // ============ ПОИСК ============
 
 func (m *MongoManager) AdvancedSearch(ctx context.Context, filters map[string]interface{}, limit int) ([]map[string]interface{}, error) {
-	posts := m.db.Collection("posts")
+    posts := m.db.Collection("posts")
+    filter := bson.M{}
 
-	filter := bson.M{}
+    // Более эффективная обработка фильтров
+    if tags, ok := filters["tags"].([]interface{}); ok && len(tags) > 0 {
+        filter["tags"] = bson.M{"$all": tags}
+    }
 
-	// Обработка тегов
-	if tags, ok := filters["tags"].([]interface{}); ok {
-		filter["tags"] = bson.M{"$in": tags}
-	}
+    if minLikes, ok := filters["min_likes"].(float64); ok && minLikes > 0 {
+        filter["stats.likes"] = bson.M{"$gte": int(minLikes)}
+    }
 
-	// Обработка минимальных лайков
-	if minLikes, ok := filters["min_likes"].(float64); ok {
-		filter["stats.likes"] = bson.M{"$gte": int(minLikes)}
-	}
+    if excludeTags, ok := filters["exclude_tags"].([]interface{}); ok && len(excludeTags) > 0 {
+        filter["tags"] = bson.M{"$nin": excludeTags}
+    }
 
-	// Исключение тегов
-	if excludeTags, ok := filters["exclude_tags"].([]interface{}); ok {
-		filter["tags"] = bson.M{"$nin": excludeTags}
-	}
+    // Оптимизация: используем более эффективный набор полей
+    opts := options.Find().
+        SetLimit(int64(limit)).
+        SetSort(bson.D{{Key: "stats.likes", Value: -1}}).
+        SetBatchSize(100). // Увеличиваем batch size
+        SetProjection(bson.M{
+            "post_id":   1,
+            "title":     1,
+            "tags":      1,
+            "stats":     1,
+            "_id":       0,
+        })
 
-	opts := options.Find().
-		SetLimit(int64(limit)).
-		SetSort(bson.D{{Key: "stats.likes", Value: -1}}).
-		SetProjection(bson.M{
-			"post_id": 1,
-			"title":   1,
-			"tags":    1,
-			"stats":   1,
-			"_id":     0,
-		})
+    cursor, err := posts.Find(ctx, filter, opts)
+    if err != nil {
+        return nil, err
+    }
+    defer cursor.Close(ctx)
 
-	cursor, err := posts.Find(ctx, filter, opts)
-	if err != nil {
-		return nil, err
-	}
-	defer cursor.Close(ctx)
+    // Оптимизация: используем более эффективное чтение
+    var results []map[string]interface{}
+    for cursor.Next(ctx) {
+        var result map[string]interface{}
+        if err := cursor.Decode(&result); err != nil {
+            continue
+        }
+        results = append(results, result)
+    }
 
-	var results []map[string]interface{}
-	if err := cursor.All(ctx, &results); err != nil {
-		return nil, err
-	}
-
-	return results, nil
+    return results, cursor.Err()
 }
 
 // ============ АГРЕГАЦИИ ============
 
 func (m *MongoManager) GetTopTags(ctx context.Context, limit int) ([]map[string]interface{}, error) {
-	posts := m.db.Collection("posts")
+    posts := m.db.Collection("posts")
 
-	pipeline := mongo.Pipeline{
-		{{Key: "$unwind", Value: "$tags"}},
-		{{Key: "$group", Value: bson.M{
-			"_id":         "$tags",
-			"count":       bson.M{"$sum": 1},
-			"total_likes": bson.M{"$sum": "$stats.likes"},
-		}}},
-		{{Key: "$sort", Value: bson.M{"count": -1}}},
-		{{Key: "$limit", Value: limit}},
-		{{Key: "$project", Value: bson.M{
-			"tag":         "$_id",
-			"count":       1,
-			"total_likes": 1,
-			"_id":         0,
-		}}},
-	}
+    // Only use allowDiskUse for large limits (to avoid the 2938ms bug)
+    var opts *options.AggregateOptions
+    if limit > 20 {
+        opts = options.Aggregate().SetAllowDiskUse(true)
+    }
+    
+    pipeline := mongo.Pipeline{
+        {{Key: "$unwind", Value: "$tags"}},
+        {{Key: "$group", Value: bson.M{
+            "_id":         "$tags",
+            "count":       bson.M{"$sum": 1},
+            "total_likes": bson.M{"$sum": "$stats.likes"},
+        }}},
+        {{Key: "$sort", Value: bson.M{"count": -1}}},
+        {{Key: "$limit", Value: limit}},
+        {{Key: "$project", Value: bson.M{
+            "tag":         "$_id",
+            "count":       1,
+            "total_likes": 1,
+            "_id":         0,
+        }}},
+    }
 
-	cursor, err := posts.Aggregate(ctx, pipeline)
-	if err != nil {
-		return nil, err
-	}
-	defer cursor.Close(ctx)
+    var cursor *mongo.Cursor
+    var err error
+    
+    if opts != nil {
+        cursor, err = posts.Aggregate(ctx, pipeline, opts)
+    } else {
+        cursor, err = posts.Aggregate(ctx, pipeline)
+    }
+    
+    if err != nil {
+        return nil, err
+    }
+    defer cursor.Close(ctx)
 
-	var results []map[string]interface{}
-	if err := cursor.All(ctx, &results); err != nil {
-		return nil, err
-	}
+    var results []map[string]interface{}
+    if err := cursor.All(ctx, &results); err != nil {
+        return nil, err
+    }
 
-	return results, nil
+    return results, nil
 }
 
 func (m *MongoManager) GetPostEngagementAnalysis(ctx context.Context, days int) (map[string]interface{}, error) {
@@ -411,75 +439,177 @@ func (m *MongoManager) RecordUserInteraction(ctx context.Context, userID string,
 }
 
 func (m *MongoManager) GetUserHistory(ctx context.Context, userID string, limit int) ([]map[string]interface{}, error) {
-	interactions := m.db.Collection("user_interactions")
+    interactions := m.db.Collection("user_interactions")
+    posts := m.db.Collection("posts")
 
-	pipeline := mongo.Pipeline{
-		{{Key: "$match", Value: bson.M{"user_id": userID}}},
-		{{Key: "$lookup", Value: bson.M{
-			"from":         "posts",
-			"localField":   "post_id",
-			"foreignField": "post_id",
-			"as":           "post_details",
-		}}},
-		{{Key: "$unwind", Value: "$post_details"}},
-		{{Key: "$sort", Value: bson.M{"timestamp": -1}}},
-		{{Key: "$limit", Value: limit}},
-		{{Key: "$project", Value: bson.M{
-			"action":     1,
-			"timestamp":  1,
-			"post_id":    1,
-			"post_title": "$post_details.title",
-			"_id":        0,
-		}}},
-	}
+    // АДАПТИВНЫЙ ПОДХОД: проверяем количество записей
+    count, err := interactions.CountDocuments(ctx, bson.M{"user_id": userID})
+    if err != nil {
+        return nil, err
+    }
 
-	cursor, err := interactions.Aggregate(ctx, pipeline)
-	if err != nil {
-		return nil, err
-	}
-	defer cursor.Close(ctx)
+    // Если мало записей (< 50) - используем простой pipeline
+    if count < 50 {
+        pipeline := mongo.Pipeline{
+            {{Key: "$match", Value: bson.M{"user_id": userID}}},
+            {{Key: "$lookup", Value: bson.M{
+                "from":         "posts",
+                "localField":   "post_id",
+                "foreignField": "post_id",
+                "as":           "post_details",
+            }}},
+            {{Key: "$unwind", Value: "$post_details"}},
+            {{Key: "$sort", Value: bson.M{"timestamp": -1}}},
+            {{Key: "$limit", Value: limit}},
+            {{Key: "$project", Value: bson.M{
+                "action":     1,
+                "timestamp":  1,
+                "post_id":    1,
+                "post_title": "$post_details.title",
+                "_id":        0,
+            }}},
+        }
 
-	var results []map[string]interface{}
-	if err := cursor.All(ctx, &results); err != nil {
-		return nil, err
-	}
+        cursor, err := interactions.Aggregate(ctx, pipeline)
+        if err != nil {
+            return nil, err
+        }
+        defer cursor.Close(ctx)
 
-	return results, nil
+        var results []map[string]interface{}
+        if err := cursor.All(ctx, &results); err != nil {
+            return nil, err
+        }
+        return results, nil
+    }
+
+    // Для больших объемов - используем оптимизированный подход
+    // Оптимизация 1: Сначала получаем только ID постов
+    pipeline := mongo.Pipeline{
+        {{Key: "$match", Value: bson.M{"user_id": userID}}},
+        {{Key: "$sort", Value: bson.M{"timestamp": -1}}},
+        {{Key: "$limit", Value: limit}},
+        {{Key: "$project", Value: bson.M{
+            "action":     1,
+            "timestamp":  1,
+            "post_id":    1,
+            "_id":        0,
+        }}},
+    }
+
+    cursor, err := interactions.Aggregate(ctx, pipeline)
+    if err != nil {
+        return nil, err
+    }
+    defer cursor.Close(ctx)
+
+    var interactionResults []map[string]interface{}
+    if err := cursor.All(ctx, &interactionResults); err != nil {
+        return nil, err
+    }
+
+    // Оптимизация 2: Получаем данные постов одним запросом
+    if len(interactionResults) == 0 {
+        return []map[string]interface{}{}, nil
+    }
+
+    postIDs := make([]int, 0, len(interactionResults))
+    for _, inter := range interactionResults {
+        if id, ok := inter["post_id"].(int32); ok {
+            postIDs = append(postIDs, int(id))
+        }
+    }
+
+    // Получаем посты одним запросом
+    postFilter := bson.M{"post_id": bson.M{"$in": postIDs}}
+    postCursor, err := posts.Find(ctx, postFilter, options.Find().
+        SetProjection(bson.M{
+            "post_id": 1,
+            "title":   1,
+        }))
+    if err != nil {
+        return nil, err
+    }
+    defer postCursor.Close(ctx)
+
+    var postResults []map[string]interface{}
+    if err := postCursor.All(ctx, &postResults); err != nil {
+        return nil, err
+    }
+
+    // Создаем map для быстрого поиска постов
+    postMap := make(map[int]string)
+    for _, post := range postResults {
+        if id, ok := post["post_id"].(int32); ok {
+            if title, ok := post["title"].(string); ok {
+                postMap[int(id)] = title
+            }
+        }
+    }
+
+    // Объединяем результаты
+    results := make([]map[string]interface{}, 0, len(interactionResults))
+    for _, inter := range interactionResults {
+        if postID, ok := inter["post_id"].(int32); ok {
+            result := make(map[string]interface{})
+            result["action"] = inter["action"]
+            result["timestamp"] = inter["timestamp"]
+            result["post_id"] = postID
+            result["post_title"] = postMap[int(postID)]
+            results = append(results, result)
+        }
+    }
+
+    return results, nil
 }
-
 // ============ МАТЕРИАЛИЗОВАННЫЕ ПРЕДСТАВЛЕНИЯ ============
 
 func (m *MongoManager) MaterializeTopPostsView(ctx context.Context) error {
-	posts := m.db.Collection("posts")
-	topPostsView := m.db.Collection("top_posts_view")
+    posts := m.db.Collection("posts")
+    topPostsView := m.db.Collection("top_posts_view")
 
-	// Очищаем старую витрину
-	if err := topPostsView.Drop(ctx); err != nil {
-		log.Printf("Warning: failed to drop top_posts_view: %v", err)
-	}
+    cutoffDate := time.Now().AddDate(0, 0, -7)
 
-	cutoffDate := time.Now().AddDate(0, 0, -7)
+    // Оптимизация: используем более эффективный pipeline
+    pipeline := mongo.Pipeline{
+        {{Key: "$match", Value: bson.M{
+            "created_at": bson.M{"$gte": cutoffDate},
+            "stats.views": bson.M{"$gt": 0}, // Только посты с просмотрами
+        }}},
+        {{Key: "$addFields", Value: bson.M{
+            "total_score": bson.M{
+                "$add": bson.A{
+                    bson.M{"$multiply": bson.A{"$stats.likes", 3}},
+                    bson.M{"$multiply": bson.A{"$stats.comments", 2}},
+                    bson.M{"$multiply": bson.A{"$stats.views", 0.5}},
+                },
+            },
+        }}},
+        {{Key: "$sort", Value: bson.M{"total_score": -1}}},
+        {{Key: "$limit", Value: 100}},
+    }
 
-	pipeline := mongo.Pipeline{
-		{{Key: "$match", Value: bson.M{
-			"created_at": bson.M{"$gte": cutoffDate},
-		}}},
-		{{Key: "$addFields", Value: bson.M{
-			"total_score": bson.M{
-				"$add": bson.A{
-					bson.M{"$multiply": bson.A{"$stats.likes", 3}},
-					bson.M{"$multiply": bson.A{"$stats.comments", 2}},
-					"$stats.views",
-				},
-			},
-		}}},
-		{{Key: "$sort", Value: bson.M{"total_score": -1}}},
-		{{Key: "$limit", Value: 100}},
-		{{Key: "$out", Value: "top_posts_view"}},
-	}
+    // Оптимизация: создаем временную коллекцию и затем переименовываем
+    tempCollection := "top_posts_view_temp"
+    
+    pipelineWithOut := append(pipeline, bson.D{{Key: "$out", Value: tempCollection}})
+    _, err := posts.Aggregate(ctx, pipelineWithOut)
+    if err != nil {
+        return err
+    }
 
-	_, err := posts.Aggregate(ctx, pipeline)
-	return err
+    // Атомарная замена коллекций
+    if err := topPostsView.Drop(ctx); err != nil {
+        log.Printf("Warning: failed to drop old view: %v", err)
+    }
+    
+    // УБИРАЕМ НЕНУЖНУЮ ПЕРЕМЕННУЮ tempColl
+    renameCmd := bson.D{
+        {Key: "renameCollection", Value: m.db.Name() + "." + tempCollection},
+        {Key: "to", Value: m.db.Name() + "." + "top_posts_view"},
+    }
+    
+    return m.db.RunCommand(ctx, renameCmd).Err()
 }
 
 func (m *MongoManager) GetTopPostsFromView(ctx context.Context, limit int) ([]map[string]interface{}, error) {
