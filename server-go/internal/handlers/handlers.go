@@ -1512,34 +1512,42 @@ func (h *Handlers) engagementAnalysisHandler(w http.ResponseWriter, r *http.Requ
 }
 
 func (h *Handlers) userHistoryHandler(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	userID := vars["user_id"]
+    vars := mux.Vars(r)
+    userID := vars["user_id"]
 
-	limit := 50
-	if l := r.URL.Query().Get("limit"); l != "" {
-		limit, _ = strconv.Atoi(l)
-	}
+    limit := 50
+    if l := r.URL.Query().Get("limit"); l != "" {
+        limit, _ = strconv.Atoi(l)
+    }
 
-	ctx := r.Context()
-	cacheKey := fmt.Sprintf("user_history:%s:%d", userID, limit)
+    ctx := r.Context()
+    cacheKey := fmt.Sprintf("user_history:%s:%d", userID, limit)
 
-	if cached, err := h.cache.Get(ctx, cacheKey); err == nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(cached))
-		return
-	}
+    // Увеличиваем TTL для часто запрашиваемых данных
+    if cached, err := h.cache.Get(ctx, cacheKey); err == nil {
+        w.Header().Set("Content-Type", "application/json")
+        w.Write([]byte(cached))
+        return
+    }
 
-	results, err := h.mongo.GetUserHistory(ctx, userID, limit)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
+    results, err := h.mongo.GetUserHistory(ctx, userID, limit)
+    if err != nil {
+        http.Error(w, err.Error(), http.StatusInternalServerError)
+        return
+    }
 
-	data := mustMarshal(results)
-	h.cache.SetEX(ctx, cacheKey, string(data), 300)
+    data := mustMarshal(results)
+    
+    // Динамический TTL: чем больше результатов, тем дольше кэш
+    ttl := 300 // 5 минут по умолчанию
+    if len(results) > 0 {
+        ttl = 600 // 10 минут для непустых результатов
+    }
+    
+    h.cache.SetEX(ctx, cacheKey, string(data), ttl)
 
-	w.Header().Set("Content-Type", "application/json")
-	w.Write(data)
+    w.Header().Set("Content-Type", "application/json")
+    w.Write(data)
 }
 
 func (h *Handlers) topPostsViewHandler(w http.ResponseWriter, r *http.Request) {
