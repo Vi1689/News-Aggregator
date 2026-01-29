@@ -114,47 +114,59 @@ func main() {
 
 // ============ ФУНКЦИИ ГЕНЕРАЦИИ ДАННЫХ ============
 
+// Добавим глобальные счетчики для всех объектов
+var postCounter int
+var tagCounter int
+var channelCounter int
+var authorCounter int
+var sourceCounter int
+var commentCounter int
+var mediaCounter int
+
 func generateBatch() {
 	// 1. Источники (создаем один раз)
 	if len(sourceIDs) == 0 {
-		createSources()
+		createSources(5) // Генерируем 5 уникальных источников
 	}
 	
-	// 2. Авторы
+	// 2. Авторы (создаем 3 новых автора, если их меньше 10)
 	if len(authorIDs) < 10 {
 		createAuthors(3)
 	}
 	
-	// 3. Каналы
+	// 3. Каналы (создаем 2 новых канала, если их меньше 5)
 	if len(channelIDs) < 5 {
 		createChannels(2)
 	}
 	
-	// 4. Посты (основной контент)
+	// 4. Посты (основной контент, количество определяется BatchSize)
 	createPosts(config.BatchSize)
 	
-	// 5. Теги (создаем по мере необходимости)
+	// 5. Теги (создаем 2 новых тега, если их меньше 10)
 	if len(tagIDs) < 10 {
 		createTags(2)
 	}
 	
-	// 6. Комментарии (к некоторым постам)
+	// 6. Комментарии (к некоторым постам, создаем от 1 до 3 комментариев)
 	createComments(rand.Intn(3) + 1)
 	
-	// 7. Медиа (к некоторым постам)
+	// 7. Медиа (к некоторым постам, создаем от 1 до 2 медиа)
 	createMedia(rand.Intn(2) + 1)
 }
 
-func createSources() {
-	sources := []map[string]interface{}{
-		{"name": "РИА Новости", "address": "https://ria.ru", "topic": topics[rand.Intn(len(topics))]},
-		{"name": "ТАСС", "address": "https://tass.ru", "topic": topics[rand.Intn(len(topics))]},
-		{"name": "Коммерсант", "address": "https://kommersant.ru", "topic": "бизнес"},
-		{"name": "Ведомости", "address": "https://vedomosti.ru", "topic": "экономика"},
-		{"name": "РБК", "address": "https://rbc.ru", "topic": "бизнес"},
-	}
-	
-	for _, data := range sources {
+// Генерация уникальных источников с использованием счетчика
+func createSources(count int) {
+	for i := 0; i < count; i++ {
+		// Генерация уникального имени для источника
+		sourceCounter++
+		sourceName := fmt.Sprintf("source_%d", sourceCounter)
+		
+		data := map[string]interface{}{
+			"name":    sourceName,
+			"address": fmt.Sprintf("https://source%d.example.com", sourceCounter),
+			"topic":   topics[rand.Intn(len(topics))],
+		}
+		
 		id, err := sendRequest("/api/sources", data, "source_id")
 		if err != nil {
 			logger.Printf("Ошибка создания источника: %v", err)
@@ -167,10 +179,15 @@ func createSources() {
 	}
 }
 
+// Генерация уникальных авторов с использованием счетчика
 func createAuthors(count int) {
 	for i := 0; i < count; i++ {
+		// Генерация уникального имени для автора
+		authorCounter++
+		authorName := fmt.Sprintf("author_%d", authorCounter)
+		
 		data := map[string]interface{}{
-			"name": gofakeit.Name(),
+			"name": authorName,
 		}
 		
 		id, err := sendRequest("/api/authors", data, "author_id")
@@ -185,17 +202,22 @@ func createAuthors(count int) {
 	}
 }
 
+// Генерация уникальных каналов с использованием счетчика
 func createChannels(count int) {
 	if len(sourceIDs) == 0 {
 		return
 	}
 	
 	for i := 0; i < count; i++ {
+		// Генерация уникального имени для канала
+		channelCounter++
+		channelName := fmt.Sprintf("channel_%d", channelCounter)
+		
 		subscribers := rand.Intn(100000) + 1000
 		topic := topics[rand.Intn(len(topics))]
 		
 		data := map[string]interface{}{
-			"name":               fmt.Sprintf("Канал %s %d", topic, i+1),
+			"name":               channelName,
 			"link":               fmt.Sprintf("https://channel-%d.example.com", i+1),
 			"subscribers_count":  subscribers,
 			"source_id":          sourceIDs[rand.Intn(len(sourceIDs))],
@@ -214,67 +236,13 @@ func createChannels(count int) {
 	}
 }
 
-func createPosts(count int) {
-	if len(authorIDs) == 0 || len(channelIDs) == 0 {
-		logger.Printf("Недостаточно авторов или каналов для создания постов")
-		return
-	}
-	
-	for i := 0; i < count; i++ {
-		// Генерируем реалистичный пост
-		title := generatePostTitle()
-		content := generatePostContent()
-		tags := generateTags(rand.Intn(3) + 1)
-		
-		data := map[string]interface{}{
-			"title":           title,
-			"content":         content,
-			"author_id":       authorIDs[rand.Intn(len(authorIDs))],
-			"channel_id":      channelIDs[rand.Intn(len(channelIDs))],
-			"likes_count":     rand.Intn(1000),
-			"comments_count":  rand.Intn(100),
-			"created_at":      randomTimeInPast(7).Format("2006-01-02 15:04:05"),
-			"tags":            tags,
-		}
-		
-		id, err := sendRequest("/api/posts", data, "post_id")
-		if err != nil {
-			if strings.Contains(err.Error(), "Duplicate post detected") {
-				logger.Printf("Дубликат поста обнаружен, пропускаем")
-				continue
-			}
-			logger.Printf("Ошибка создания поста: %v", err)
-			stats.Errors++
-		} else if id > 0 {
-			stats.PostsCreated++
-			
-			// Сохраняем теги для последующего использования
-			for _, tag := range tags {
-				if !contains(tagPool, tag) {
-					tagPool = append(tagPool, tag)
-				}
-			}
-			
-			// Шанс на добавление комментариев позже
-			if rand.Float32() < 0.3 {
-				// Запоминаем ID поста для комментариев
-				go func(postID int) {
-					time.Sleep(time.Duration(rand.Intn(5)+1) * time.Second)
-					createCommentsForPost(postID, rand.Intn(3)+1)
-				}(id)
-			}
-		}
-		time.Sleep(200 * time.Millisecond) // Задержка между постами
-	}
-}
-
+// Генерация уникальных тегов с использованием счетчика
 func createTags(count int) {
 	for i := 0; i < count; i++ {
-		if i >= len(tagPool) {
-			break
-		}
+		// Генерация уникального имени для тега
+		tagCounter++
+		tagName := fmt.Sprintf("tag_%d", tagCounter)
 		
-		tagName := tagPool[rand.Intn(len(tagPool))]
 		data := map[string]interface{}{
 			"name": tagName,
 		}
@@ -294,6 +262,7 @@ func createTags(count int) {
 	}
 }
 
+// Генерация уникальных комментариев с использованием счетчика
 func createComments(count int) {
 	// Получаем последние посты
 	posts := getRecentPosts(count * 2)
@@ -305,11 +274,16 @@ func createComments(count int) {
 		post := posts[i].(map[string]interface{})
 		postID := int(post["post_id"].(float64))
 		
-		createCommentsForPost(postID, rand.Intn(2)+1)
+		// Генерация уникального комментария
+		commentCounter++
+		commentText := fmt.Sprintf("Комментарий %d для поста %d", commentCounter, postID)
+		
+		createCommentsForPost(postID, rand.Intn(2)+1, commentText)
 	}
 }
 
-func createCommentsForPost(postID, count int) {
+// Генерация комментариев для конкретного поста
+func createCommentsForPost(postID, count int, commentText string) {
 	if len(authorIDs) == 0 {
 		return
 	}
@@ -318,14 +292,9 @@ func createCommentsForPost(postID, count int) {
 		data := map[string]interface{}{
 			"post_id":   postID,
 			"nickname":  gofakeit.Username(),
-			"text":      generateCommentText(),
+			"text":      commentText,
 			"likes_count": rand.Intn(50),
 			"created_at": time.Now().Add(-time.Duration(rand.Intn(86400)) * time.Second).Format("2006-01-02 15:04:05"),
-		}
-		
-		// Шанс на вложенный комментарий
-		if rand.Float32() < 0.2 && i > 0 {
-			// Пока пропускаем parent_comment_id для простоты
 		}
 		
 		_, err := sendRequest("/api/comments", data, "comment_id")
@@ -339,6 +308,7 @@ func createCommentsForPost(postID, count int) {
 	}
 }
 
+// Генерация уникальных медиа с использованием счетчика
 func createMedia(count int) {
 	// Получаем посты для добавления медиа
 	posts := getRecentPosts(count)
@@ -352,6 +322,10 @@ func createMedia(count int) {
 		post := posts[i].(map[string]interface{})
 		postID := int(post["post_id"].(float64))
 		mediaType := mediaTypes[rand.Intn(len(mediaTypes))]
+		
+		// Генерация уникального медиа
+		mediaCounter++
+		mediaContent := fmt.Sprintf("media_content_%d", mediaCounter)
 		
 		data := map[string]interface{}{
 			"post_id":       postID,
