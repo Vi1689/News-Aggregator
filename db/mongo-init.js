@@ -1,3 +1,34 @@
+// ============================================
+// 1. СОЗДАНИЕ ПОЛЬЗОВАТЕЛЕЙ В БАЗЕ ADMIN
+// ============================================
+print("🔐 Creating users in admin database...");
+
+// Переключаемся на базу admin для создания пользователя с правами мониторинга
+db = db.getSiblingDB('admin');
+
+// Пользователь для мониторинга (создается в admin базе)
+db.createUser({
+  user: "monitor",
+  pwd: "monitor_pass",
+  roles: [
+    { role: "clusterMonitor", db: "admin" },
+    { role: "readAnyDatabase", db: "admin" }
+  ]
+});
+
+print("✅ Monitor user created: monitor in admin database");
+
+// Root администратор (если еще не создан)
+if (!db.getUser("admin")) {
+  db.createUser({
+    user: "admin",
+    pwd: "mongopass",
+    roles: [{ role: "root", db: "admin" }]
+  });
+  print("✅ Admin user created: admin");
+}
+
+
 // Инициализация MongoDB для News Aggregator
 db = db.getSiblingDB('news_aggregator');
 
