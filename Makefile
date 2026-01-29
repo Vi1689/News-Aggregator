@@ -1,9 +1,13 @@
 
-up: 
+up:
+	sudo chown $$USER:$$USER db/mongo-keyfile
+	sudo chmod 600 db/mongo-keyfile
 	docker-compose up --build -d
 
 # поднятие с выводом в консоль вывод в консоль
 up-verbose:
+	sudo chown $$USER:$$USER db/mongo-keyfile
+	sudo chmod 600 db/mongo-keyfile
 	docker-compose up --build
 
 down:
