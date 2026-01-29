@@ -51,6 +51,21 @@ services:
       retries: 10
       start_period: 30s
 
+  # генерация ключа для mongodb
+  mongo-init:
+    image: mongo:latest
+    # profiles: ["init"]
+    volumes:
+      - mongo-keyfile:/opt/mongo-config
+    command: >
+      sh -c "
+      openssl rand -base64 756 > /opt/mongo-config/keyfile &&
+      chmod 600 /opt/mongo-config/keyfile &&
+      chown 999:999 /opt/mongo-config/keyfile &&
+      echo '✅ Keyfile generated' &&
+      cat /opt/mongo-config/keyfile | base64
+      "
+
   mongodb:
     image: mongo:7
     container_name: mongodb
@@ -62,23 +77,25 @@ services:
       - "27017:27017"
     volumes:
       - mongodb_data:/data/db
-      - ./db/mongo-keyfile:/opt/keyfile:ro
+      - mongo-keyfile:/opt/mongo-config
       - ./db/mongo-init-replica-set.js:/docker-entrypoint-initdb.d/init-replica-set.js:ro
     command: 
       - bash
       - -c
       - |
         # Установить правильные права на файл ключа
-        # chmod 600 /opt/keyfile
-        chown 999:999 /opt/keyfile
-        exec mongod --auth --bind_ip_all --replSet rs0 --keyFile /opt/keyfile
+        # chmod 600 /opt/mongo-config/keyfile
+        # chown 999:999 /opt/mongo-config/keyfile
+        exec mongod --auth --bind_ip_all --replSet rs0 --keyFile /opt/mongo-config/keyfile
         # Подождать пока MongoDB запустится
         sleep 10
         
         # Инициализировать реплика-сет
         echo "Initializing replica set..."
         mongosh --username admin --password mongopass --file /docker-entrypoint-initdb.d/init-replica-set.js
-
+    depends_on:
+      mongo-init:
+        condition: service_completed_successfully
     healthcheck:
       test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/admin --quiet --username admin --password mongopass
       interval: 10s
@@ -96,15 +113,15 @@ services:
       - "27018:27017"
     volumes:
       - mongodb_secondary1_data:/data/db
-      - ./db/mongo-keyfile:/opt/keyfile
+      - mongo-keyfile:/opt/mongo-config
     command: 
       - bash
       - -c
       - |
         # Установить правильные права на файл ключа
-        # chmod 600 /opt/keyfile
-        chown 999:999 /opt/keyfile:ro
-        exec mongod --auth --bind_ip_all --replSet rs0 --keyFile /opt/keyfile
+        chmod 600 /opt/mongo-config/keyfile
+        chown 999:999 /opt/mongo-config/keyfile
+        exec mongod --auth --bind_ip_all --replSet rs0 --keyFile /opt/mongo-config/keyfile
     depends_on:
       - mongodb
     healthcheck:
@@ -124,15 +141,15 @@ services:
       - "27019:27017"
     volumes:
       - mongodb_secondary2_data:/data/db
-      - ./db/mongo-keyfile:/opt/keyfile:ro
+      - mongo-keyfile:/opt/mongo-config
     command: 
       - bash
       - -c
       - |
         # Установить правильные права на файл ключа
-        # chmod 600 /opt/keyfile
-        chown 999:999 /opt/keyfile
-        exec mongod --auth --bind_ip_all --replSet rs0 --keyFile /opt/keyfile
+        chmod 600 /opt/mongo-config/keyfile
+        chown 999:999 /opt/mongo-config/keyfile
+        exec mongod --auth --bind_ip_all --replSet rs0 --keyFile /opt/mongo-config/keyfile
     depends_on:
       - mongodb
     healthcheck:
@@ -263,6 +280,8 @@ volumes:
   redis_data:
     driver: local
   
+  mongo-keyfile:
+
   # репликация
   mongodb_secondary1_data:
   mongodb_secondary2_data:
