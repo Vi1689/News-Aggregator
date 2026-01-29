@@ -57,17 +57,85 @@ services:
     environment:
       MONGO_INITDB_ROOT_USERNAME: admin
       MONGO_INITDB_ROOT_PASSWORD: mongopass
-      MONGO_INITDB_DATABASE: news_aggregator
     ports:
       - "27017:27017"
     volumes:
       - mongodb_data:/data/db
-      - ./db/mongo-init.js:/docker-entrypoint-initdb.d/mongo-init.js:ro
+      - ./db/mongo-keyfile:/opt/keyfile:ro
+      - ./db/mongo-init-replica-set.js:/docker-entrypoint-initdb.d/init-replica-set.js:ro
     command: 
-      - --auth
-      - --bind_ip_all
+      - bash
+      - -c
+      - |
+        # Установить правильные права на файл ключа
+        # chmod 600 /opt/keyfile
+        chown 999:999 /opt/keyfile
+        exec mongod --auth --bind_ip_all --replSet rs0 --keyFile /opt/keyfile
+        # Подождать пока MongoDB запустится
+        sleep 10
+        
+        # Инициализировать реплика-сет
+        echo "Initializing replica set..."
+        mongosh --username admin --password mongopass --file /docker-entrypoint-initdb.d/init-replica-set.js
+
     healthcheck:
-      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/news_aggregator --quiet
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/admin --quiet --username admin --password mongopass
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+
+  mongodb-secondary-1:
+    image: mongo:7
+    container_name: mongodb-secondary-1
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: mongopass
+    ports:
+      - "27018:27017"
+    volumes:
+      - mongodb_secondary1_data:/data/db
+      - ./db/mongo-keyfile:/opt/keyfile
+    command: 
+      - bash
+      - -c
+      - |
+        # Установить правильные права на файл ключа
+        # chmod 600 /opt/keyfile
+        chown 999:999 /opt/keyfile:ro
+        exec mongod --auth --bind_ip_all --replSet rs0 --keyFile /opt/keyfile
+    depends_on:
+      - mongodb
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/admin --quiet --username admin --password mongopass
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+
+  mongodb-secondary-2:
+    image: mongo:7
+    container_name: mongodb-secondary-2
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: mongopass
+    ports:
+      - "27019:27017"
+    volumes:
+      - mongodb_secondary2_data:/data/db
+      - ./db/mongo-keyfile:/opt/keyfile:ro
+    command: 
+      - bash
+      - -c
+      - |
+        # Установить правильные права на файл ключа
+        # chmod 600 /opt/keyfile
+        chown 999:999 /opt/keyfile
+        exec mongod --auth --bind_ip_all --replSet rs0 --keyFile /opt/keyfile
+    depends_on:
+      - mongodb
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/admin --quiet --username admin --password mongopass
       interval: 10s
       timeout: 10s
       retries: 5
@@ -193,9 +261,10 @@ volumes:
     driver: local
   redis_data:
     driver: local
+  
+  # репликация
+  mongodb_secondary1_data:
+  mongodb_secondary2_data:
+  # репликация -------------------
 
-networks:
-  default:
-    name: news-aggregator-network
-    driver: bridge
-  postgres_replica_data:
+
