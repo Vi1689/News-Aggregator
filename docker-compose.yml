@@ -57,6 +57,7 @@ services:
     environment:
       MONGO_INITDB_ROOT_USERNAME: admin
       MONGO_INITDB_ROOT_PASSWORD: mongopass
+      MONGO_INITDB_DATABASE: news_aggregator
     ports:
       - "27017:27017"
     volumes:
