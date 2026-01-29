@@ -9,9 +9,89 @@ PURPLE='\033[0;35m'
 CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
-# Функция для выполнения MongoDB команд
+# Переменная для хранения метода аутентификации
+AUTH_METHOD=""
+
+# Функция для выполнения MongoDB команд с разными вариантами аутентификации
 run_mongo() {
-    docker exec mongodb mongosh --quiet --eval "$1" admin -u admin -p mongopass
+    local command="$1"
+    
+    if [ -z "$AUTH_METHOD" ]; then
+        detect_auth_method
+    fi
+    
+    case $AUTH_METHOD in
+        "admin")
+            # Используем root/admin пользователя
+            docker exec mongodb mongosh --quiet \
+                --eval "$command" \
+                admin \
+                -u admin \
+                -p mongopass \
+                --authenticationDatabase admin
+            ;;
+        "app")
+            # Используем app пользователя
+            docker exec mongodb mongosh --quiet \
+                --eval "$command" \
+                news_aggregator \
+                -u news_app \
+                -p app_password \
+                --authenticationDatabase news_aggregator
+            ;;
+        "none")
+            # Без аутентификации
+            docker exec mongodb mongosh --quiet --eval "$command"
+            ;;
+        *)
+            echo -e "${RED}❌ Не удалось определить метод аутентификации${NC}"
+            return 1
+            ;;
+    esac
+}
+
+# Функция для определения метода аутентификации
+detect_auth_method() {
+    echo -e "${CYAN}Определение метода аутентификации...${NC}"
+    
+    # Попробуем admin пользователя
+    if docker exec mongodb mongosh --quiet \
+        --eval "print('✅ Admin auth OK')" \
+        admin \
+        -u admin \
+        -p mongopass \
+        --authenticationDatabase admin 2>/dev/null; then
+        AUTH_METHOD="admin"
+        echo -e "${GREEN}✅ Используется аутентификация: admin/mongopass${NC}"
+        return 0
+    fi
+    
+    # Попробуем app пользователя
+    if docker exec mongodb mongosh --quiet \
+        --eval "print('✅ App auth OK')" \
+        news_aggregator \
+        -u news_app \
+        -p app_password \
+        --authenticationDatabase news_aggregator 2>/dev/null; then
+        AUTH_METHOD="app"
+        echo -e "${GREEN}✅ Используется аутентификация: news_app/app_password${NC}"
+        return 0
+    fi
+    
+    # Попробуем без аутентификации
+    if docker exec mongodb mongosh --quiet \
+        --eval "print('✅ No auth OK')" 2>/dev/null; then
+        AUTH_METHOD="none"
+        echo -e "${GREEN}✅ Используется подключение без аутентификации${NC}"
+        return 0
+    fi
+    
+    echo -e "${RED}❌ Не удалось подключиться к MongoDB${NC}"
+    echo -e "${YELLOW}Возможные причины:${NC}"
+    echo -e "1. Контейнер MongoDB не запущен"
+    echo -e "2. Неправильные учетные данные"
+    echo -e "3. MongoDB еще не инициализирована"
+    return 1
 }
 
 # Функция для форматирования вывода
@@ -28,6 +108,8 @@ show_menu() {
     echo -e "${YELLOW}   MongoDB Monitoring Dashboard${NC}"
     echo -e "${GREEN}=================================${NC}"
     echo ""
+    echo -e "Метод аутентификации: ${CYAN}${AUTH_METHOD:-не определен}${NC}"
+    echo ""
     echo -e "1.  ${CYAN}Общие метрики сервера${NC}"
     echo -e "2.  ${CYAN}Статистика соединений${NC}"
     echo -e "3.  ${CYAN}Использование памяти${NC}"
@@ -40,34 +122,59 @@ show_menu() {
     echo -e "10. ${CYAN}Метрики для Prometheus${NC}"
     echo -e "11. ${CYAN}Полный отчет${NC}"
     echo -e "12. ${CYAN}Мониторинг в реальном времени${NC}"
+    echo -e "13. ${CYAN}Проверить/сменить подключение${NC}"
     echo -e "0.  ${RED}Выход${NC}"
     echo ""
-    echo -n "Выберите опцию [0-12]: "
+    echo -n "Выберите опцию [0-13]: "
 }
 
 # 1. Общие метрики сервера
 show_general_metrics() {
     format_output "ОБЩИЕ МЕТРИКИ СЕРВЕРА"
     
-    run_mongo "
-    const status = db.serverStatus();
-    
-    console.log('Версия MongoDB: ' + status.version);
-    console.log('Аптайм: ' + status.uptime + ' секунд (' + Math.round(status.uptime/60) + ' минут)');
-    console.log('Хост: ' + status.host);
-    console.log('Процесс ID: ' + status.pid);
-    console.log('Текущее время: ' + new Date(status.localTime));
-    
-    // Проверка режима
-    if (status.storageEngine && status.storageEngine.name) {
-        console.log('Движок хранилища: ' + status.storageEngine.name);
-    }
-    
-    // Проверка журналирования
-    if (status.storageEngine && status.storageEngine.supportsCommittedReads !== undefined) {
-        console.log('Поддержка транзакций: ' + (status.storageEngine.supportsCommittedReads ? 'Да' : 'Нет'));
-    }
-    "
+    # Для admin аутентификации используем admin команды
+    if [ "$AUTH_METHOD" = "admin" ]; then
+        run_mongo "
+        const status = db.adminCommand({serverStatus: 1});
+        
+        console.log('Версия MongoDB: ' + status.version);
+        console.log('Аптайм: ' + status.uptime + ' секунд (' + Math.round(status.uptime/60) + ' минут)');
+        console.log('Хост: ' + status.host);
+        console.log('Процесс ID: ' + status.pid);
+        console.log('Текущее время: ' + new Date(status.localTime));
+        
+        // Проверка режима
+        if (status.storageEngine && status.storageEngine.name) {
+            console.log('Движок хранилища: ' + status.storageEngine.name);
+        }
+        
+        // Проверка журналирования
+        if (status.storageEngine && status.storageEngine.supportsCommittedReads !== undefined) {
+            console.log('Поддержка транзакций: ' + (status.storageEngine.supportsCommittedReads ? 'Да' : 'Нет'));
+        }
+        "
+    else
+        # Для других методов
+        run_mongo "
+        const status = db.serverStatus();
+        
+        console.log('Версия MongoDB: ' + status.version);
+        console.log('Аптайм: ' + status.uptime + ' секунд (' + Math.round(status.uptime/60) + ' минут)');
+        console.log('Хост: ' + status.host);
+        console.log('Процесс ID: ' + status.pid);
+        console.log('Текущее время: ' + new Date(status.localTime));
+        
+        // Проверка режима
+        if (status.storageEngine && status.storageEngine.name) {
+            console.log('Движок хранилища: ' + status.storageEngine.name);
+        }
+        
+        // Проверка журналирования
+        if (status.storageEngine && status.storageEngine.supportsCommittedReads !== undefined) {
+            console.log('Поддержка транзакций: ' + (status.storageEngine.supportsCommittedReads ? 'Да' : 'Нет'));
+        }
+        "
+    fi
     
     echo -e "\n${GREEN}Нажмите Enter для продолжения...${NC}"
     read
@@ -234,49 +341,55 @@ show_collection_stats() {
     format_output "СТАТИСТИКА КОЛЛЕКЦИЙ"
     
     run_mongo "
-    const db = db.getSiblingDB('news_aggregator');
-    const collections = db.getCollectionNames();
-    
-    console.log('База данных: news_aggregator');
-    console.log('Коллекций: ' + collections.length);
-    console.log('');
-    
-    console.log('Название'.padEnd(25) + 'Документы'.padStart(10) + 'Размер'.padStart(12) + 'Индексы'.padStart(10));
-    console.log('-'.repeat(57));
-    
-    let totalDocs = 0;
-    let totalSize = 0;
-    let totalIndexes = 0;
-    
-    collections.forEach(collName => {
-        try {
-            const stats = db[collName].stats();
-            const docs = stats.count || 0;
-            const size = Math.round((stats.size || 0) / 1024);
-            const indexes = stats.nindexes || 0;
-            
-            console.log(
-                collName.padEnd(25) +
-                docs.toString().padStart(10) +
-                (size + ' KB').padStart(12) +
-                indexes.toString().padStart(10)
-            );
-            
-            totalDocs += docs;
-            totalSize += stats.size || 0;
-            totalIndexes += indexes;
-        } catch(e) {
-            console.log(collName.padEnd(25) + 'ОШИБКА'.padStart(30));
-        }
-    });
-    
-    console.log('-'.repeat(57));
-    console.log(
-        'ИТОГО:'.padEnd(25) +
-        totalDocs.toString().padStart(10) +
-        (Math.round(totalSize / 1024) + ' KB').padStart(12) +
-        totalIndexes.toString().padStart(10)
-    );
+    try {
+        const db = db.getSiblingDB('news_aggregator');
+        const collections = db.getCollectionNames();
+        
+        console.log('База данных: news_aggregator');
+        console.log('Коллекций: ' + collections.length);
+        console.log('');
+        
+        console.log('Название'.padEnd(25) + 'Документы'.padStart(10) + 'Размер'.padStart(12) + 'Индексы'.padStart(10));
+        console.log('-'.repeat(57));
+        
+        let totalDocs = 0;
+        let totalSize = 0;
+        let totalIndexes = 0;
+        
+        collections.forEach(collName => {
+            try {
+                const stats = db[collName].stats();
+                const docs = stats.count || 0;
+                const size = Math.round((stats.size || 0) / 1024);
+                const indexes = stats.nindexes || 0;
+                
+                console.log(
+                    collName.padEnd(25) +
+                    docs.toString().padStart(10) +
+                    (size + ' KB').padStart(12) +
+                    indexes.toString().padStart(10)
+                );
+                
+                totalDocs += docs;
+                totalSize += stats.size || 0;
+                totalIndexes += indexes;
+            } catch(e) {
+                console.log(collName.padEnd(25) + 'ОШИБКА'.padStart(30));
+            }
+        });
+        
+        console.log('-'.repeat(57));
+        console.log(
+            'ИТОГО:'.padEnd(25) +
+            totalDocs.toString().padStart(10) +
+            (Math.round(totalSize / 1024) + ' KB').padStart(12) +
+            totalIndexes.toString().padStart(10)
+        );
+    } catch(e) {
+        console.log('Ошибка доступа к базе news_aggregator: ' + e.message);
+        console.log('Текущая база: ' + db.getName());
+        console.log('Доступные базы: ' + JSON.stringify(db.getMongo().getDBs()));
+    }
     "
     
     echo -e "\n${GREEN}Нажмите Enter для продолжения...${NC}"
@@ -288,32 +401,36 @@ show_index_usage() {
     format_output "ИСПОЛЬЗОВАНИЕ ИНДЕКСОВ"
     
     run_mongo "
-    const db = db.getSiblingDB('news_aggregator');
-    
-    // Получаем статистику использования индексов
-    const indexStats = {};
-    
-    // Для каждой коллекции
-    db.getCollectionNames().forEach(collName => {
-        const coll = db.getCollection(collName);
-        const stats = coll.stats();
+    try {
+        const db = db.getSiblingDB('news_aggregator');
         
-        if (stats.nindexes > 0) {
-            console.log('\nКоллекция: ' + collName);
-            console.log('  Индексов: ' + stats.nindexes);
-            console.log('  Размер индексов: ' + Math.round(stats.totalIndexSize / 1024 / 1024 * 100) / 100 + ' MB');
+        // Получаем статистику использования индексов
+        const indexStats = {};
+        
+        // Для каждой коллекции
+        db.getCollectionNames().forEach(collName => {
+            const coll = db.getCollection(collName);
+            const stats = coll.stats();
             
-            // Показываем отдельные индексы
-            const indexes = coll.getIndexes();
-            indexes.forEach((idx, i) => {
-                console.log('  ' + (i+1) + '. ' + idx.name + ':');
-                console.log('     Поля: ' + JSON.stringify(idx.key));
-                if (idx.unique) console.log('     Уникальный: Да');
-                if (idx.sparse) console.log('     Разреженный: Да');
-                if (idx.expireAfterSeconds) console.log('     TTL: ' + idx.expireAfterSeconds + ' секунд');
-            });
-        }
-    });
+            if (stats.nindexes > 0) {
+                console.log('\nКоллекция: ' + collName);
+                console.log('  Индексов: ' + stats.nindexes);
+                console.log('  Размер индексов: ' + Math.round(stats.totalIndexSize / 1024 / 1024 * 100) / 100 + ' MB');
+                
+                // Показываем отдельные индексы
+                const indexes = coll.getIndexes();
+                indexes.forEach((idx, i) => {
+                    console.log('  ' + (i+1) + '. ' + idx.name + ':');
+                    console.log('     Поля: ' + JSON.stringify(idx.key));
+                    if (idx.unique) console.log('     Уникальный: Да');
+                    if (idx.sparse) console.log('     Разреженный: Да');
+                    if (idx.expireAfterSeconds) console.log('     TTL: ' + idx.expireAfterSeconds + ' секунд');
+                });
+            }
+        });
+    } catch(e) {
+        console.log('Ошибка: ' + e.message);
+    }
     "
     
     echo -e "\n${GREEN}Нажмите Enter для продолжения...${NC}"
@@ -325,27 +442,31 @@ show_active_operations() {
     format_output "АКТИВНЫЕ ОПЕРАЦИИ"
     
     run_mongo "
-    const ops = db.currentOp();
-    
-    if (ops.inprog && ops.inprog.length > 0) {
-        console.log('Активных операций: ' + ops.inprog.length);
-        console.log('');
+    try {
+        const ops = db.currentOp();
         
-        ops.inprog.forEach((op, index) => {
-            console.log('Операция #' + (index + 1) + ':');
-            console.log('  ID: ' + op.opid);
-            console.log('  Тип: ' + op.op);
-            console.log('  База/Коллекция: ' + (op.ns || 'N/A'));
-            console.log('  Выполняется: ' + op.secs_running + ' секунд');
-            console.log('  Состояние: ' + (op.msg || 'N/A'));
-            
-            if (op.command) {
-                console.log('  Команда: ' + JSON.stringify(op.command).substring(0, 100) + '...');
-            }
+        if (ops.inprog && ops.inprog.length > 0) {
+            console.log('Активных операций: ' + ops.inprog.length);
             console.log('');
-        });
-    } else {
-        console.log('✅ Нет активных операций');
+            
+            ops.inprog.forEach((op, index) => {
+                console.log('Операция #' + (index + 1) + ':');
+                console.log('  ID: ' + op.opid);
+                console.log('  Тип: ' + op.op);
+                console.log('  База/Коллекция: ' + (op.ns || 'N/A'));
+                console.log('  Выполняется: ' + op.secs_running + ' секунд');
+                console.log('  Состояние: ' + (op.msg || 'N/A'));
+                
+                if (op.command) {
+                    console.log('  Команда: ' + JSON.stringify(op.command).substring(0, 100) + '...');
+                }
+                console.log('');
+            });
+        } else {
+            console.log('✅ Нет активных операций');
+        }
+    } catch(e) {
+        console.log('Ошибка получения активных операций: ' + e.message);
     }
     "
     
@@ -358,51 +479,55 @@ show_slow_queries() {
     format_output "МЕДЛЕННЫЕ ЗАПРОСЫ (более 100ms)"
     
     run_mongo "
-    const db = db.getSiblingDB('news_aggregator');
-    
-    console.log('Проверка профилировщика...');
-    
-    // Включаем профилировщик если выключен
-    const profilerStatus = db.getProfilingStatus();
-    if (profilerStatus.was == 0) {
-        console.log('ℹ️  Профилировщик выключен. Включаем на время проверки...');
-        db.setProfilingLevel(1, 100); // Включаем для запросов > 100ms
-    }
-    
-    // Получаем медленные запросы
-    const slowQueries = db.system.profile
-        .find({ millis: { \$gt: 100 } })
-        .sort({ ts: -1 })
-        .limit(10)
-        .toArray();
-    
-    if (slowQueries.length > 0) {
-        console.log('Найдено медленных запросов: ' + slowQueries.length);
-        console.log('');
+    try {
+        const db = db.getSiblingDB('news_aggregator');
         
-        slowQueries.forEach((query, index) => {
-            console.log('Медленный запрос #' + (index + 1) + ':');
-            console.log('  Время: ' + query.ts);
-            console.log('  Длительность: ' + query.millis + ' ms');
-            console.log('  Операция: ' + query.op);
-            console.log('  Коллекция: ' + query.ns);
-            
-            if (query.command) {
-                console.log('  Команда: ' + JSON.stringify(query.command).substring(0, 150));
-            }
-            
-            if (query.planSummary) {
-                console.log('  План: ' + query.planSummary);
-            }
-            
+        console.log('Проверка профилировщика...');
+        
+        // Включаем профилировщик если выключен
+        const profilerStatus = db.getProfilingStatus();
+        if (profilerStatus.was == 0) {
+            console.log('ℹ️  Профилировщик выключен. Включаем на время проверки...');
+            db.setProfilingLevel(1, 100); // Включаем для запросов > 100ms
+        }
+        
+        // Получаем медленные запросы
+        const slowQueries = db.system.profile
+            .find({ millis: { \$gt: 100 } })
+            .sort({ ts: -1 })
+            .limit(10)
+            .toArray();
+        
+        if (slowQueries.length > 0) {
+            console.log('Найдено медленных запросов: ' + slowQueries.length);
             console.log('');
-        });
-    } else {
-        console.log('✅ Медленных запросов не найдено');
+            
+            slowQueries.forEach((query, index) => {
+                console.log('Медленный запрос #' + (index + 1) + ':');
+                console.log('  Время: ' + query.ts);
+                console.log('  Длительность: ' + query.millis + ' ms');
+                console.log('  Операция: ' + query.op);
+                console.log('  Коллекция: ' + query.ns);
+                
+                if (query.command) {
+                    console.log('  Команда: ' + JSON.stringify(query.command).substring(0, 150));
+                }
+                
+                if (query.planSummary) {
+                    console.log('  План: ' + query.planSummary);
+                }
+                
+                console.log('');
+            });
+        } else {
+            console.log('✅ Медленных запросов не найдено');
+        }
+        
+        // Возвращаем исходный уровень профилирования
+        db.setProfilingLevel(profilerStatus.was, profilerStatus.slowms);
+    } catch(e) {
+        console.log('Ошибка при проверке медленных запросов: ' + e.message);
     }
-    
-    // Возвращаем исходный уровень профилирования
-    db.setProfilingLevel(profilerStatus.was, profilerStatus.slowms);
     "
     
     echo -e "\n${GREEN}Нажмите Enter для продолжения...${NC}"
@@ -453,56 +578,63 @@ show_prometheus_metrics() {
     format_output "МЕТРИКИ В ФОРМАТЕ PROMETHEUS"
     
     run_mongo "
-    const status = db.serverStatus();
-    const dbStats = db.getSiblingDB('news_aggregator').stats();
-    
-    // Формат Prometheus
-    console.log('# HELP mongodb_up Whether MongoDB is up');
-    console.log('# TYPE mongodb_up gauge');
-    console.log('mongodb_up 1');
-    
-    console.log('# HELP mongodb_version_info MongoDB version info');
-    console.log('# TYPE mongodb_version_info gauge');
-    console.log('mongodb_version_info{version=\"' + status.version + '\"} 1');
-    
-    console.log('# HELP mongodb_connections_current Current connections');
-    console.log('# TYPE mongodb_connections_current gauge');
-    console.log('mongodb_connections_current ' + (status.connections.current || 0));
-    
-    console.log('# HELP mongodb_connections_available Available connections');
-    console.log('# TYPE mongodb_connections_available gauge');
-    console.log('mongodb_connections_available ' + (status.connections.available || 0));
-    
-    console.log('# HELP mongodb_memory_resident_megabytes Resident memory in megabytes');
-    console.log('# TYPE mongodb_memory_resident_megabytes gauge');
-    console.log('mongodb_memory_resident_megabytes ' + (status.mem.resident || 0));
-    
-    console.log('# HELP mongodb_memory_virtual_megabytes Virtual memory in megabytes');
-    console.log('# TYPE mongodb_memory_virtual_megabytes gauge');
-    console.log('mongodb_memory_virtual_megabytes ' + (status.mem.virtual || 0));
-    
-    console.log('# HELP mongodb_operations_total Total operations since startup');
-    console.log('# TYPE mongodb_operations_total counter');
-    console.log('mongodb_operations_total{type=\"insert\"} ' + (status.opcounters.insert || 0));
-    console.log('mongodb_operations_total{type=\"query\"} ' + (status.opcounters.query || 0));
-    console.log('mongodb_operations_total{type=\"update\"} ' + (status.opcounters.update || 0));
-    console.log('mongodb_operations_total{type=\"delete\"} ' + (status.opcounters.delete || 0));
-    
-    console.log('# HELP mongodb_documents_total Total documents in database');
-    console.log('# TYPE mongodb_documents_total gauge');
-    console.log('mongodb_documents_total ' + (dbStats.objects || 0));
-    
-    console.log('# HELP mongodb_database_size_bytes Database size in bytes');
-    console.log('# TYPE mongodb_database_size_bytes gauge');
-    console.log('mongodb_database_size_bytes ' + (dbStats.dataSize || 0));
-    
-    console.log('# HELP mongodb_index_size_bytes Total index size in bytes');
-    console.log('# TYPE mongodb_index_size_bytes gauge');
-    console.log('mongodb_index_size_bytes ' + (dbStats.indexSize || 0));
+    try {
+        const status = db.serverStatus();
+        const dbStats = db.getSiblingDB('news_aggregator').stats();
+        
+        // Формат Prometheus
+        console.log('# HELP mongodb_up Whether MongoDB is up');
+        console.log('# TYPE mongodb_up gauge');
+        console.log('mongodb_up 1');
+        
+        console.log('# HELP mongodb_version_info MongoDB version info');
+        console.log('# TYPE mongodb_version_info gauge');
+        console.log('mongodb_version_info{version=\"' + status.version + '\"} 1');
+        
+        console.log('# HELP mongodb_connections_current Current connections');
+        console.log('# TYPE mongodb_connections_current gauge');
+        console.log('mongodb_connections_current ' + (status.connections.current || 0));
+        
+        console.log('# HELP mongodb_connections_available Available connections');
+        console.log('# TYPE mongodb_connections_available gauge');
+        console.log('mongodb_connections_available ' + (status.connections.available || 0));
+        
+        console.log('# HELP mongodb_memory_resident_megabytes Resident memory in megabytes');
+        console.log('# TYPE mongodb_memory_resident_megabytes gauge');
+        console.log('mongodb_memory_resident_megabytes ' + (status.mem.resident || 0));
+        
+        console.log('# HELP mongodb_memory_virtual_megabytes Virtual memory in megabytes');
+        console.log('# TYPE mongodb_memory_virtual_megabytes gauge');
+        console.log('mongodb_memory_virtual_megabytes ' + (status.mem.virtual || 0));
+        
+        console.log('# HELP mongodb_operations_total Total operations since startup');
+        console.log('# TYPE mongodb_operations_total counter');
+        console.log('mongodb_operations_total{type=\"insert\"} ' + (status.opcounters.insert || 0));
+        console.log('mongodb_operations_total{type=\"query\"} ' + (status.opcounters.query || 0));
+        console.log('mongodb_operations_total{type=\"update\"} ' + (status.opcounters.update || 0));
+        console.log('mongodb_operations_total{type=\"delete\"} ' + (status.opcounters.delete || 0));
+        
+        console.log('# HELP mongodb_documents_total Total documents in database');
+        console.log('# TYPE mongodb_documents_total gauge');
+        console.log('mongodb_documents_total ' + (dbStats.objects || 0));
+        
+        console.log('# HELP mongodb_database_size_bytes Database size in bytes');
+        console.log('# TYPE mongodb_database_size_bytes gauge');
+        console.log('mongodb_database_size_bytes ' + (dbStats.dataSize || 0));
+        
+        console.log('# HELP mongodb_index_size_bytes Total index size in bytes');
+        console.log('# TYPE mongodb_index_size_bytes gauge');
+        console.log('mongodb_index_size_bytes ' + (dbStats.indexSize || 0));
+    } catch(e) {
+        console.log('# HELP mongodb_up Whether MongoDB is up');
+        console.log('# TYPE mongodb_up gauge');
+        console.log('mongodb_up 0');
+        console.log('# ERROR ' + e.message);
+    }
     "
     
     echo -e "\n${YELLOW}Эти метрики можно сохранить в файл и использовать с Prometheus:${NC}"
-    echo -e "  ./mongo-cli-monitor 10 > mongodb_metrics.prom"
+    echo -e "  ./mango.sh 10 > mongodb_metrics.prom"
     echo -e "\n${GREEN}Нажмите Enter для продолжения...${NC}"
     read
 }
@@ -610,7 +742,40 @@ except Exception as e:
     done
 }
 
+# 13. Проверка подключения
+show_connection_test() {
+    format_output "ПРОВЕРКА ПОДКЛЮЧЕНИЯ К MONGODB"
+    
+    # Сбрасываем текущий метод
+    AUTH_METHOD=""
+    
+    if detect_auth_method; then
+        echo -e "\n${GREEN}✅ Подключение успешно установлено${NC}"
+        echo -e "Используется метод: ${CYAN}${AUTH_METHOD}${NC}"
+        
+        # Проверяем доступные базы
+        echo -e "\n${YELLOW}Проверка доступных баз данных:${NC}"
+        run_mongo "print('Доступные базы: ' + JSON.stringify(db.getMongo().getDBs()))"
+    else
+        echo -e "\n${RED}❌ Не удалось подключиться к MongoDB${NC}"
+        echo -e "\n${YELLOW}Попробуйте:${NC}"
+        echo -e "1. Проверить, запущен ли контейнер: docker ps | grep mongo"
+        echo -e "2. Проверить логи: docker logs mongodb"
+        echo -e "3. Подключиться вручную: docker exec -it mongodb mongosh"
+    fi
+    
+    echo -e "\n${GREEN}Нажмите Enter для продолжения...${NC}"
+    read
+}
+
 # Главный цикл
+# Проверяем подключение при старте
+if ! detect_auth_method; then
+    echo -e "${RED}❌ Не удалось подключиться к MongoDB${NC}"
+    echo -e "${YELLOW}Запустите скрипт снова после запуска контейнеров${NC}"
+    exit 1
+fi
+
 while true; do
     show_menu
     read choice
@@ -628,6 +793,7 @@ while true; do
         10) show_prometheus_metrics ;;
         11) show_full_report ;;
         12) show_realtime_monitor ;;
+        13) show_connection_test ;;
         0) 
             echo -e "\n${GREEN}Выход...${NC}"
             exit 0
