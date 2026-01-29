@@ -53,7 +53,7 @@ services:
 
   mongodb:
     image: mongo:7
-    container_name: mongodb
+    container_name: mongodb-primary
     environment:
       MONGO_INITDB_ROOT_USERNAME: admin
       MONGO_INITDB_ROOT_PASSWORD: mongopass
@@ -61,17 +61,101 @@ services:
     ports:
       - "27017:27017"
     volumes:
-      - mongodb_data:/data/db
+      - mongodb_primary_data:/data/db
       - ./db/mongo-init.js:/docker-entrypoint-initdb.d/mongo-init.js:ro
     command: 
       - --auth
       - --bind_ip_all
+      - --replSet
+      - rs0
     healthcheck:
       test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/news_aggregator --quiet
       interval: 10s
       timeout: 10s
       retries: 5
       start_period: 40s
+
+  mongodb-secondary1:
+    image: mongo:7
+    container_name: mongodb-secondary1
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: mongopass
+      MONGO_INITDB_DATABASE: news_aggregator
+    ports:
+      - "27018:27017"
+    volumes:
+      - mongodb_secondary1_data:/data/db
+    command: 
+      - --auth
+      - --bind_ip_all
+      - --replSet
+      - rs0
+    depends_on:
+      - mongodb
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/news_aggregator --quiet
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+
+  mongodb-secondary2:
+    image: mongo:7
+    container_name: mongodb-secondary2
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: mongopass
+      MONGO_INITDB_DATABASE: news_aggregator
+    ports:
+      - "27019:27017"
+    volumes:
+      - mongodb_secondary2_data:/data/db
+    command: 
+      - --auth
+      - --bind_ip_all
+      - --replSet
+      - rs0
+    depends_on:
+      - mongodb
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/news_aggregator --quiet
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+
+  mongo-init-replica:
+    image: mongo:7
+    container_name: mongo-init-replica
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      mongodb-secondary1:
+        condition: service_healthy
+      mongodb-secondary2:
+        condition: service_healthy
+    restart: "no"
+    command: >
+      bash -c "
+        echo 'Waiting for MongoDB instances to be ready...'
+        sleep 10
+        echo 'Initializing replica set...'
+        mongosh --host mongodb-primary:27017 -u admin -p mongopass --authenticationDatabase admin --eval '
+          rs.initiate({
+            _id: \"rs0\",
+            members: [
+              {_id: 0, host: \"mongodb-primary:27017\", priority: 2},
+              {_id: 1, host: \"mongodb-secondary1:27017\", priority: 1},
+              {_id: 2, host: \"mongodb-secondary2:27017\", priority: 1}
+            ]
+          })
+        '
+        echo 'Replica set initialized'
+        sleep 5
+        echo 'Checking replica set status...'
+        mongosh --host mongodb-primary:27017 -u admin -p mongopass --authenticationDatabase admin --eval 'rs.status()'
+      "
 
   redis:
     image: redis:7-alpine
@@ -102,8 +186,14 @@ services:
         condition: service_healthy
       mongodb:
         condition: service_healthy
+      mongodb-secondary1:
+        condition: service_healthy
+      mongodb-secondary2:
+        condition: service_healthy
+      mongo-init-replica:
+        condition: service_completed_successfully
     environment:
-      - MONGODB_URI=mongodb://news_app:app_password@mongodb:27017/news_aggregator?authSource=news_aggregator
+      - MONGODB_URI=mongodb://news_app:app_password@mongodb-primary:27017,mongodb-secondary1:27017,mongodb-secondary2:27017/news_aggregator?authSource=news_aggregator&replicaSet=rs0&readPreference=secondaryPreferred
       - POSTGRES_MASTER=host=db-master port=5432 dbname=news_db user=news_user password=news_pass sslmode=disable
       - POSTGRES_REPLICA=host=db-replica port=5432 dbname=news_db user=news_user password=news_pass sslmode=disable
       - REDIS_ADDR=redis:6379
@@ -189,7 +279,11 @@ volumes:
     driver: local
   postgres_replica_data:
     driver: local
-  mongodb_data:
+  mongodb_primary_data:
+    driver: local
+  mongodb_secondary1_data:
+    driver: local
+  mongodb_secondary2_data:
     driver: local
   redis_data:
     driver: local
