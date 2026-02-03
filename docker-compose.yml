@@ -178,7 +178,7 @@ services:
     build:
       context: ./server-go
       dockerfile: Dockerfile
-    container_name: news-server-go
+    container_name: news-aggregator-server
     depends_on:
       redis:
         condition: service_healthy
