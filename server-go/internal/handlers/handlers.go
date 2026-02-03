@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/http/httputil"
 	"strconv"
 	"strings"
 	"time"
@@ -83,14 +84,14 @@ func (h *Handlers) SetupRoutes() http.Handler {
 	r.HandleFunc("/health", h.healthHandler).Methods("GET")
 
 	// MongoDB endpoints
-	r.HandleFunc("/api/mongo/search/advanced", h.advancedSearchHandler).Methods("POST")
-	r.HandleFunc("/api/mongo/analytics/top-tags", h.topTagsHandler).Methods("GET")
-	r.HandleFunc("/api/mongo/analytics/engagement", h.engagementAnalysisHandler).Methods("GET")
-	r.HandleFunc("/api/mongo/user/{user_id}/history", h.userHistoryHandler).Methods("GET")
-	r.HandleFunc("/api/mongo/top-posts", h.topPostsViewHandler).Methods("GET")
-	r.HandleFunc("/api/mongo/posts/{post_id}/operations", h.postOperationsHandler).Methods("POST")
-	r.HandleFunc("/api/mongo/analytics/channels", h.channelPerformanceHandler).Methods("GET")
-	r.HandleFunc("/api/mongo/materialize", h.materializeViewHandler).Methods("POST")
+	// r.HandleFunc("/api/mongo/search/advanced", h.advancedSearchHandler).Methods("POST")
+	// r.HandleFunc("/api/mongo/analytics/top-tags", h.topTagsHandler).Methods("GET")
+	// r.HandleFunc("/api/mongo/analytics/engagement", h.engagementAnalysisHandler).Methods("GET")
+	// r.HandleFunc("/api/mongo/user/{user_id}/history", h.userHistoryHandler).Methods("GET")
+	// r.HandleFunc("/api/mongo/top-posts", h.topPostsViewHandler).Methods("GET")
+	// r.HandleFunc("/api/mongo/posts/{post_id}/operations", h.postOperationsHandler).Methods("POST")
+	// r.HandleFunc("/api/mongo/analytics/channels", h.channelPerformanceHandler).Methods("GET")
+	// r.HandleFunc("/api/mongo/materialize", h.materializeViewHandler).Methods("POST")
 
 	// CRUD операции для PostgreSQL
 	r.HandleFunc("/api/{table}", h.createHandler).Methods("POST")
@@ -122,6 +123,14 @@ func (h *Handlers) healthHandler(w http.ResponseWriter, r *http.Request) {
 // ============ CRUD HANDLERS ============
 
 func (h *Handlers) createHandler(w http.ResponseWriter, r *http.Request) {
+
+	dump, err := httputil.DumpRequest(r, true)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	fmt.Printf("--- Incoming Request ---\n%s\n", dump)
+
 	vars := mux.Vars(r)
 	table := vars["table"]
 
@@ -136,11 +145,13 @@ func (h *Handlers) createHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	fmt.Printf("Data = %+v\n============================================\n", data)
+
 	// ОСОБАЯ ЛОГИКА ДЛЯ СОЗДАНИЯ ПОСТОВ
-	if table == "posts" {
-		h.createPostHandler(w, r, data)
-		return
-	}
+	// if table == "posts" {
+	// 	h.createPostHandler(w, r, data)
+	// 	return
+	// }
 
 	// Проверка дубликатов для posts (для обычных таблиц)
 	if table == "posts" && data["content"] != nil {
@@ -177,6 +188,8 @@ func (h *Handlers) createHandler(w http.ResponseWriter, r *http.Request) {
 
 	query := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s) RETURNING *",
 		table, strings.Join(cols, ", "), strings.Join(placeholders, ", "))
+
+	fmt.Printf("Query = %+v\n============================================\n", query)
 
 	ctx := r.Context()
 	conn, err := h.pool.Acquire(ctx, false) // Запись - только мастер
@@ -248,6 +261,7 @@ func (h *Handlers) createHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(result)
+	fmt.Printf("============ Added !!!!! ===========")
 }
 
 // createPostHandler - специальный обработчик для создания постов
@@ -256,21 +270,12 @@ func (h *Handlers) createPostHandler(w http.ResponseWriter, r *http.Request, dat
 
 	// Проверка обязательных полей
 	title, hasTitle := data["title"].(string)
-	content, hasContent := data["content"].(string)
-	if !hasTitle || !hasContent {
+	if !hasTitle {
 		http.Error(w, "Title and content are required", http.StatusBadRequest)
 		return
 	}
 
 	// Проверка дубликатов (только для обычных запросов, не для VK)
-	if !strings.Contains(r.URL.Path, "/vk/") {
-		hash := fmt.Sprintf("%x", sha256.Sum256([]byte(title+content)))
-		isDup, _ := h.mongo.IsDuplicateContent(ctx, hash)
-		if isDup {
-			http.Error(w, "Duplicate post detected", http.StatusConflict)
-			return
-		}
-	}
 
 	authorID, hasAuthor := data["author_id"].(float64)
 	if !hasAuthor {
@@ -310,9 +315,9 @@ func (h *Handlers) createPostHandler(w http.ResponseWriter, r *http.Request, dat
 	defer tx.Rollback(ctx)
 
 	// 1. Вставляем контент в news_texts - ИСПРАВЛЕНО: используем колонку "text" вместо "content"
-	textQuery := "INSERT INTO news_texts (text) VALUES ($1) RETURNING text_id"
+	// textQuery := "INSERT INTO news_texts (text) VALUES ($1) RETURNING text_id"
 	var textID int32
-	err = tx.QueryRow(ctx, textQuery, content).Scan(&textID)
+	// err = tx.QueryRow(ctx, textQuery, text).Scan(&textID)
 	if err != nil {
 		http.Error(w, "Failed to insert content: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -421,7 +426,7 @@ func (h *Handlers) createPostHandler(w http.ResponseWriter, r *http.Request, dat
 		}
 	}
 
-	go h.mongo.IndexPost(context.Background(), int(postID), title, content, tags)
+	// go h.mongo.IndexPost(context.Background(), int(postID), title, content, tags)
 
 	// 5. Подготовка ответа
 	result := map[string]interface{}{
@@ -433,7 +438,6 @@ func (h *Handlers) createPostHandler(w http.ResponseWriter, r *http.Request, dat
 		"comments_count": resultCommentsCount,
 		"likes_count":    resultLikesCount,
 		"created_at":     resultCreatedAt.Format("2006-01-02 15:04:05"),
-		"content":        content,
 		"tags":           tags,
 	}
 
@@ -1367,4 +1371,3 @@ func mustMarshal(v interface{}) []byte {
 	data, _ := json.Marshal(v)
 	return data
 }
-
