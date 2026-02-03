@@ -2,7 +2,7 @@ package handlers
 
 import (
 	"context"
-	"crypto/sha256"
+	// "crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -15,6 +15,7 @@ import (
 	"news-aggregator/internal/cache"
 	"news-aggregator/internal/mongo"
 	"news-aggregator/internal/pgpool"
+	"news-aggregator/internal/validators"
 
 	"github.com/gorilla/mux"
 	"github.com/jackc/pgx/v5"
@@ -69,6 +70,8 @@ var pkMap = map[string]string{
 	"comments":   "comment_id",
 }
 
+var TablesValidators *validators.ValidatorRegistry
+
 func NewHandlers(pool *pgpool.PgPool, cache *cache.CacheManager, mongo *mongo.MongoManager) *Handlers {
 	return &Handlers{
 		pool:  pool,
@@ -84,15 +87,16 @@ func (h *Handlers) SetupRoutes() http.Handler {
 	r.HandleFunc("/health", h.healthHandler).Methods("GET")
 
 	// MongoDB endpoints
-	// r.HandleFunc("/api/mongo/search/advanced", h.advancedSearchHandler).Methods("POST")
-	// r.HandleFunc("/api/mongo/analytics/top-tags", h.topTagsHandler).Methods("GET")
-	// r.HandleFunc("/api/mongo/analytics/engagement", h.engagementAnalysisHandler).Methods("GET")
-	// r.HandleFunc("/api/mongo/user/{user_id}/history", h.userHistoryHandler).Methods("GET")
-	// r.HandleFunc("/api/mongo/top-posts", h.topPostsViewHandler).Methods("GET")
-	// r.HandleFunc("/api/mongo/posts/{post_id}/operations", h.postOperationsHandler).Methods("POST")
-	// r.HandleFunc("/api/mongo/analytics/channels", h.channelPerformanceHandler).Methods("GET")
-	// r.HandleFunc("/api/mongo/materialize", h.materializeViewHandler).Methods("POST")
+	r.HandleFunc("/api/mongo/search/advanced", h.advancedSearchHandler).Methods("POST")
+	r.HandleFunc("/api/mongo/analytics/top-tags", h.topTagsHandler).Methods("GET")
+	r.HandleFunc("/api/mongo/analytics/engagement", h.engagementAnalysisHandler).Methods("GET")
+	r.HandleFunc("/api/mongo/user/{user_id}/history", h.userHistoryHandler).Methods("GET")
+	r.HandleFunc("/api/mongo/top-posts", h.topPostsViewHandler).Methods("GET")
+	r.HandleFunc("/api/mongo/posts/{post_id}/operations", h.postOperationsHandler).Methods("POST")
+	r.HandleFunc("/api/mongo/analytics/channels", h.channelPerformanceHandler).Methods("GET")
+	r.HandleFunc("/api/mongo/materialize", h.materializeViewHandler).Methods("POST")
 
+	TablesValidators = validators.InitValidatorRegistry()
 	// CRUD операции для PostgreSQL
 	r.HandleFunc("/api/{table}", h.createHandler).Methods("POST")
 	r.HandleFunc("/api/{table}", h.readAllHandler).Methods("GET")
@@ -147,29 +151,29 @@ func (h *Handlers) createHandler(w http.ResponseWriter, r *http.Request) {
 
 	fmt.Printf("Data = %+v\n============================================\n", data)
 
-	// ОСОБАЯ ЛОГИКА ДЛЯ СОЗДАНИЯ ПОСТОВ
-	// if table == "posts" {
-	// 	h.createPostHandler(w, r, data)
-	// 	return
-	// }
-
-	// Проверка дубликатов для posts (для обычных таблиц)
-	if table == "posts" && data["content"] != nil {
-		if title, ok := data["title"].(string); ok {
-			if content, ok := data["content"].(string); ok {
-				hash := fmt.Sprintf("%x", sha256.Sum256([]byte(title+content)))
-				ctx := r.Context()
-				isDup, _ := h.mongo.IsDuplicateContent(ctx, hash)
-				if isDup {
-					http.Error(w, "Duplicate post detected", http.StatusConflict)
-					return
-				}
-			}
-		}
-	}
-
 	if len(data) == 0 {
 		http.Error(w, "No fields provided", http.StatusBadRequest)
+		return
+	}
+
+	ctx := r.Context()
+	conn, err := h.pool.Acquire(ctx, false) // Запись - только мастер
+	if err != nil {
+		http.Error(w, "Database temporarily unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	defer conn.Release()
+
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback(ctx)
+	// Проверка дубликатов для разных таблиц
+	err = TablesValidators.Validate(ctx, conn, table, data)
+	if err != nil {
+		http.Error(w, "Data validation error"+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -188,23 +192,6 @@ func (h *Handlers) createHandler(w http.ResponseWriter, r *http.Request) {
 
 	query := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s) RETURNING *",
 		table, strings.Join(cols, ", "), strings.Join(placeholders, ", "))
-
-	fmt.Printf("Query = %+v\n============================================\n", query)
-
-	ctx := r.Context()
-	conn, err := h.pool.Acquire(ctx, false) // Запись - только мастер
-	if err != nil {
-		http.Error(w, "Database temporarily unavailable", http.StatusServiceUnavailable)
-		return
-	}
-	defer conn.Release()
-
-	tx, err := conn.Begin(ctx)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	defer tx.Rollback(ctx)
 
 	// Используем Query вместо QueryRow для получения FieldDescriptions
 	rows, err := tx.Query(ctx, query, values...)
@@ -258,191 +245,6 @@ func (h *Handlers) createHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Инвалидация кеша
 	h.cache.Del(ctx, "cache:"+table)
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(result)
-	fmt.Printf("============ Added !!!!! ===========")
-}
-
-// createPostHandler - специальный обработчик для создания постов
-func (h *Handlers) createPostHandler(w http.ResponseWriter, r *http.Request, data map[string]interface{}) {
-	ctx := r.Context()
-
-	// Проверка обязательных полей
-	title, hasTitle := data["title"].(string)
-	if !hasTitle {
-		http.Error(w, "Title and content are required", http.StatusBadRequest)
-		return
-	}
-
-	// Проверка дубликатов (только для обычных запросов, не для VK)
-
-	authorID, hasAuthor := data["author_id"].(float64)
-	if !hasAuthor {
-		// Пробуем получить как int
-		if authorInt, ok := data["author_id"].(int); ok {
-			authorID = float64(authorInt)
-			hasAuthor = true
-		}
-	}
-
-	channelID, hasChannel := data["channel_id"].(float64)
-	if !hasChannel {
-		// Пробуем получить как int
-		if channelInt, ok := data["channel_id"].(int); ok {
-			channelID = float64(channelInt)
-			hasChannel = true
-		}
-	}
-
-	if !hasAuthor || !hasChannel {
-		http.Error(w, "Author ID and Channel ID are required", http.StatusBadRequest)
-		return
-	}
-
-	conn, err := h.pool.Acquire(ctx, false) // Запись - только мастер
-	if err != nil {
-		http.Error(w, "Database temporarily unavailable", http.StatusServiceUnavailable)
-		return
-	}
-	defer conn.Release()
-
-	tx, err := conn.Begin(ctx)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	defer tx.Rollback(ctx)
-
-	// 1. Вставляем контент в news_texts - ИСПРАВЛЕНО: используем колонку "text" вместо "content"
-	// textQuery := "INSERT INTO news_texts (text) VALUES ($1) RETURNING text_id"
-	var textID int32
-	// err = tx.QueryRow(ctx, textQuery, text).Scan(&textID)
-	if err != nil {
-		http.Error(w, "Failed to insert content: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	// 2. Вставляем пост в posts
-	postQuery := `INSERT INTO posts (title, author_id, text_id, channel_id, comments_count, likes_count, created_at) 
-                  VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING post_id, title, author_id, text_id, channel_id, comments_count, likes_count, created_at`
-
-	commentsCount := 0
-	likesCount := 0
-	if cc, ok := data["comments_count"].(float64); ok {
-		commentsCount = int(cc)
-	} else if cc, ok := data["comments_count"].(int); ok {
-		commentsCount = cc
-	}
-	if lc, ok := data["likes_count"].(float64); ok {
-		likesCount = int(lc)
-	} else if lc, ok := data["likes_count"].(int); ok {
-		likesCount = lc
-	}
-
-	// Определяем дату создания
-	createdAt := time.Now()
-	if ca, ok := data["created_at"].(string); ok {
-		// Пробуем распарсить строку даты
-		if parsedTime, err := time.Parse("2006-01-02 15:04:05", ca); err == nil {
-			createdAt = parsedTime
-		}
-	}
-
-	var postID int32
-	var resultTitle string
-	var resultAuthorID int32
-	var resultTextID int32
-	var resultChannelID int32
-	var resultCommentsCount int32
-	var resultLikesCount int32
-	var resultCreatedAt time.Time
-
-	err = tx.QueryRow(ctx, postQuery,
-		title,
-		int(authorID),
-		textID,
-		int(channelID),
-		commentsCount,
-		likesCount,
-		createdAt,
-	).Scan(
-		&postID,
-		&resultTitle,
-		&resultAuthorID,
-		&resultTextID,
-		&resultChannelID,
-		&resultCommentsCount,
-		&resultLikesCount,
-		&resultCreatedAt,
-	)
-
-	if err != nil {
-		http.Error(w, "Failed to insert post: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	// 3. Обработка тегов
-	if tags, ok := data["tags"].([]interface{}); ok && len(tags) > 0 {
-		for _, tagValue := range tags {
-			if tagName, ok := tagValue.(string); ok && tagName != "" {
-				// Проверяем существует ли тег, если нет - создаем
-				var tagID int32
-				tagCheckQuery := "SELECT tag_id FROM tags WHERE name = $1"
-				err := tx.QueryRow(ctx, tagCheckQuery, tagName).Scan(&tagID)
-
-				if err != nil {
-					// Тег не существует, создаем новый
-					createTagQuery := "INSERT INTO tags (name) VALUES ($1) RETURNING tag_id"
-					err = tx.QueryRow(ctx, createTagQuery, tagName).Scan(&tagID)
-					if err != nil {
-						log.Printf("Failed to create tag %s: %v", tagName, err)
-						continue
-					}
-				}
-
-				// Связываем тег с постом
-				linkTagQuery := "INSERT INTO post_tags (post_id, tag_id) VALUES ($1, $2) ON CONFLICT DO NOTHING"
-				_, err = tx.Exec(ctx, linkTagQuery, postID, tagID)
-				if err != nil {
-					log.Printf("Failed to link tag %s to post %d: %v", tagName, postID, err)
-				}
-			}
-		}
-	}
-
-	if err := tx.Commit(ctx); err != nil {
-		http.Error(w, "Failed to commit transaction: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	// 4. Индексация в MongoDB
-	tags := []string{}
-	if t, ok := data["tags"].([]interface{}); ok {
-		for _, tag := range t {
-			if tagStr, ok := tag.(string); ok {
-				tags = append(tags, tagStr)
-			}
-		}
-	}
-
-	// go h.mongo.IndexPost(context.Background(), int(postID), title, content, tags)
-
-	// 5. Подготовка ответа
-	result := map[string]interface{}{
-		"post_id":        postID,
-		"title":          resultTitle,
-		"author_id":      resultAuthorID,
-		"text_id":        resultTextID,
-		"channel_id":     resultChannelID,
-		"comments_count": resultCommentsCount,
-		"likes_count":    resultLikesCount,
-		"created_at":     resultCreatedAt.Format("2006-01-02 15:04:05"),
-		"tags":           tags,
-	}
-
-	// 6. Инвалидация кеша
-	h.cache.Del(ctx, "cache:posts", "cache:news_texts", "cache:tags", "cache:post_tags")
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(result)

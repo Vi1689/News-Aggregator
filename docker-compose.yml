@@ -204,18 +204,18 @@ services:
       start_period: 40s
 
   # Опционально: researcher-vk
-  researcher-vk:
-    build:
-      context: .
-      dockerfile: ./researchers/vk/Dockerfile
-    container_name: vk-researcher
-    depends_on:
-      server:
-        condition: service_healthy
-    volumes:
-      - ./config/researchers.xml:/usr/local/etc/vk-researcher/test_conf.xml
-      - ./researchers/vk/access_token:/usr/local/etc/vk-researcher/access_token
-    restart: unless-stopped
+  # researcher-vk:
+  #   build:
+  #     context: .
+  #     dockerfile: ./researchers/vk/Dockerfile
+  #   container_name: vk-researcher
+  #   depends_on:
+  #     server:
+  #       condition: service_healthy
+  #   volumes:
+  #     - ./config/researchers.xml:/usr/local/etc/vk-researcher/test_conf.xml
+  #     - ./researchers/vk/access_token:/usr/local/etc/vk-researcher/access_token
+  #   restart: unless-stopped
 
   # researcher-reddit:
   #   build:
