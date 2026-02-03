@@ -77,7 +77,6 @@ func NewHandlers(pool *pgpool.PgPool, cache *cache.CacheManager, mongo *mongo.Mo
 }
 
 func (h *Handlers) SetupRoutes() http.Handler {
-<<<<<<< HEAD
     r := mux.NewRouter()
 
     // Health check endpoint
@@ -445,36 +444,6 @@ func (h *Handlers) createHandlerInternal(w http.ResponseWriter, r *http.Request,
 
     w.Header().Set("Content-Type", "application/json")
     json.NewEncoder(w).Encode(result)
-=======
-	r := mux.NewRouter()
-
-	// Health check endpoint
-	r.HandleFunc("/health", h.healthHandler).Methods("GET")
-
-	// CRUD операции для PostgreSQL
-	r.HandleFunc("/api/{table}", h.createHandler).Methods("POST")
-	r.HandleFunc("/api/{table}", h.readAllHandler).Methods("GET")
-	r.HandleFunc("/api/{table}/{id}", h.readOneHandler).Methods("GET")
-	r.HandleFunc("/api/{table}/{id}", h.updateHandler).Methods("PUT")
-	r.HandleFunc("/api/{table}/{id}", h.deleteHandler).Methods("DELETE")
-
-	// Обработка post_tags с двумя ID
-	r.HandleFunc("/api/{table}/{id}/{id2}", h.readOneHandler).Methods("GET")
-	r.HandleFunc("/api/{table}/{id}/{id2}", h.updateHandler).Methods("PUT")
-	r.HandleFunc("/api/{table}/{id}/{id2}", h.deleteHandler).Methods("DELETE")
-
-	// MongoDB endpoints
-	r.HandleFunc("/api/mongo/search/advanced", h.advancedSearchHandler).Methods("POST")
-	r.HandleFunc("/api/mongo/analytics/top-tags", h.topTagsHandler).Methods("GET")
-	r.HandleFunc("/api/mongo/analytics/engagement", h.engagementAnalysisHandler).Methods("GET")
-	r.HandleFunc("/api/mongo/user/{user_id}/history", h.userHistoryHandler).Methods("GET")
-	r.HandleFunc("/api/mongo/top-posts", h.topPostsViewHandler).Methods("GET")
-	r.HandleFunc("/api/mongo/posts/{post_id}/operations", h.postOperationsHandler).Methods("POST")
-	r.HandleFunc("/api/mongo/analytics/channels", h.channelPerformanceHandler).Methods("GET")
-	r.HandleFunc("/api/mongo/materialize", h.materializeViewHandler).Methods("POST")
-
-	return r
->>>>>>> 6f851b4 (mango)
 }
 
 func (h *Handlers) healthHandler(w http.ResponseWriter, r *http.Request) {
@@ -503,7 +472,6 @@ func (h *Handlers) createHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-<<<<<<< HEAD
 	// ОСОБАЯ ЛОГИКА ДЛЯ СОЗДАНИЯ ПОСТОВ
 	if table == "posts" {
 		h.createPostHandler(w, r, data)
@@ -512,10 +480,6 @@ func (h *Handlers) createHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Проверка дубликатов для posts (для обычных таблиц)
 	if table == "posts" && data["content"] != nil {
-=======
-	// Проверка дубликатов для posts
-	if table == "posts" {
->>>>>>> 6f851b4 (mango)
 		if title, ok := data["title"].(string); ok {
 			if content, ok := data["content"].(string); ok {
 				hash := fmt.Sprintf("%x", sha256.Sum256([]byte(title+content)))
@@ -534,11 +498,7 @@ func (h *Handlers) createHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-<<<<<<< HEAD
 	// Строим SQL запрос для обычных таблиц
-=======
-	// Строим SQL запрос
->>>>>>> 6f851b4 (mango)
 	cols := []string{}
 	placeholders := []string{}
 	values := []interface{}{}
@@ -562,12 +522,6 @@ func (h *Handlers) createHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Release()
 
-<<<<<<< HEAD
-=======
-	// log.Printf("Using %s for WRITE operation on table: %s",
-	// 	map[bool]string{true: "REPLICA", false: "MASTER"}[conn.isReplica], table)
-
->>>>>>> 6f851b4 (mango)
 	tx, err := conn.Begin(ctx)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -610,13 +564,8 @@ func (h *Handlers) createHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-<<<<<<< HEAD
 	// Индексация в MongoDB для posts (если это обычный пост)
 	if table == "posts" && data["content"] != nil {
-=======
-	// Индексация в MongoDB для posts
-	if table == "posts" {
->>>>>>> 6f851b4 (mango)
 		if postID, ok := result["post_id"].(int32); ok {
 			title := data["title"].(string)
 			content := data["content"].(string)
@@ -637,7 +586,6 @@ func (h *Handlers) createHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(result)
 }
 
-<<<<<<< HEAD
 // createPostHandler - специальный обработчик для создания постов
 func (h *Handlers) createPostHandler(w http.ResponseWriter, r *http.Request, data map[string]interface{}) {
     ctx := r.Context()
@@ -832,8 +780,6 @@ func (h *Handlers) createPostHandler(w http.ResponseWriter, r *http.Request, dat
     json.NewEncoder(w).Encode(result)
 }
 
-=======
->>>>>>> 6f851b4 (mango)
 func (h *Handlers) readAllHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	table := vars["table"]
@@ -853,15 +799,12 @@ func (h *Handlers) readAllHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-<<<<<<< HEAD
 	// ОСОБАЯ ЛОГИКА ДЛЯ ПОСТОВ - собираем данные из нескольких таблиц
 	if table == "posts" {
 		h.readAllPostsHandler(w, r)
 		return
 	}
 
-=======
->>>>>>> 6f851b4 (mango)
 	// Чтение из реплики
 	conn, err := h.pool.Acquire(ctx, true)
 	if err != nil {
@@ -870,12 +813,6 @@ func (h *Handlers) readAllHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Release()
 
-<<<<<<< HEAD
-=======
-	// log.Printf("Using %s for READ operation on table: %s",
-	// 	map[bool]string{true: "REPLICA", false: "MASTER"}[conn.isReplica], table)
-
->>>>>>> 6f851b4 (mango)
 	query := fmt.Sprintf("SELECT * FROM %s", table)
 	rows, err := conn.Query(ctx, query)
 	if err != nil {
@@ -893,7 +830,6 @@ func (h *Handlers) readAllHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write(data)
 }
 
-<<<<<<< HEAD
 // readAllPostsHandler - специальный обработчик для чтения всех постов
 func (h *Handlers) readAllPostsHandler(w http.ResponseWriter, r *http.Request) {
     ctx := r.Context()
@@ -957,8 +893,6 @@ func (h *Handlers) readAllPostsHandler(w http.ResponseWriter, r *http.Request) {
     w.Write(data)
 }
 
-=======
->>>>>>> 6f851b4 (mango)
 func (h *Handlers) readOneHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	table := vars["table"]
@@ -986,11 +920,7 @@ func (h *Handlers) readOneHandler(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Database temporarily unavailable", http.StatusServiceUnavailable)
 			return
 		}
-<<<<<<< HEAD
 	defer conn.Release()
-=======
-		defer conn.Release()
->>>>>>> 6f851b4 (mango)
 
 		query := fmt.Sprintf("SELECT * FROM %s WHERE post_id=$1 AND tag_id=$2", table)
 		rows, err := conn.Query(ctx, query, id, id2)
@@ -1009,15 +939,12 @@ func (h *Handlers) readOneHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-<<<<<<< HEAD
 	// ОСОБАЯ ЛОГИКА ДЛЯ ПОСТОВ
 	if table == "posts" {
 		h.readOnePostHandler(w, r, id)
 		return
 	}
 
-=======
->>>>>>> 6f851b4 (mango)
 	// Обычное чтение по PK
 	pk, ok := pkMap[table]
 	if !ok {
@@ -1055,7 +982,6 @@ func (h *Handlers) readOneHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write(data)
 }
 
-<<<<<<< HEAD
 // readOnePostHandler - специальный обработчик для чтения одного поста
 func (h *Handlers) readOnePostHandler(w http.ResponseWriter, r *http.Request, id string) {
     ctx := r.Context()
@@ -1124,8 +1050,6 @@ func (h *Handlers) readOnePostHandler(w http.ResponseWriter, r *http.Request, id
     w.Write(data)
 }
 
-=======
->>>>>>> 6f851b4 (mango)
 func (h *Handlers) updateHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	table := vars["table"]
@@ -1136,15 +1060,12 @@ func (h *Handlers) updateHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-<<<<<<< HEAD
 	// ОСОБАЯ ЛОГИКА ДЛЯ ПОСТОВ
 	if table == "posts" {
 		h.updatePostHandler(w, r, id)
 		return
 	}
 
-=======
->>>>>>> 6f851b4 (mango)
 	pk, ok := pkMap[table]
 	if !ok {
 		http.Error(w, "Table has no simple PK", http.StatusBadRequest)
@@ -1220,7 +1141,6 @@ func (h *Handlers) updateHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("Item updated\n"))
 }
 
-<<<<<<< HEAD
 // updatePostHandler - специальный обработчик для обновления постов
 func (h *Handlers) updatePostHandler(w http.ResponseWriter, r *http.Request, id string) {
     ctx := r.Context()
@@ -1378,8 +1298,6 @@ func (h *Handlers) updatePostHandler(w http.ResponseWriter, r *http.Request, id 
     w.Write([]byte("Post updated successfully\n"))
 }
 
-=======
->>>>>>> 6f851b4 (mango)
 func (h *Handlers) deleteHandler(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	table := vars["table"]
@@ -1390,15 +1308,12 @@ func (h *Handlers) deleteHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-<<<<<<< HEAD
 	// ОСОБАЯ ЛОГИКА ДЛЯ ПОСТОВ
 	if table == "posts" {
 		h.deletePostHandler(w, r, id)
 		return
 	}
 
-=======
->>>>>>> 6f851b4 (mango)
 	// Удаление из MongoDB для posts
 	if table == "posts" {
 		postID, _ := strconv.Atoi(id)
@@ -1432,7 +1347,6 @@ func (h *Handlers) deleteHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("Item deleted\n"))
 }
 
-<<<<<<< HEAD
 // deletePostHandler - специальный обработчик для удаления постов
 func (h *Handlers) deletePostHandler(w http.ResponseWriter, r *http.Request, id string) {
 	ctx := r.Context()
@@ -1510,8 +1424,6 @@ func (h *Handlers) deletePostHandler(w http.ResponseWriter, r *http.Request, id 
 	w.Write([]byte("Post deleted successfully\n"))
 }
 
-=======
->>>>>>> 6f851b4 (mango)
 // ============ MONGODB HANDLERS ============
 
 func (h *Handlers) advancedSearchHandler(w http.ResponseWriter, r *http.Request) {
@@ -1600,7 +1512,6 @@ func (h *Handlers) engagementAnalysisHandler(w http.ResponseWriter, r *http.Requ
 }
 
 func (h *Handlers) userHistoryHandler(w http.ResponseWriter, r *http.Request) {
-<<<<<<< HEAD
     vars := mux.Vars(r)
     userID := vars["user_id"]
 
@@ -1637,36 +1548,6 @@ func (h *Handlers) userHistoryHandler(w http.ResponseWriter, r *http.Request) {
 
     w.Header().Set("Content-Type", "application/json")
     w.Write(data)
-=======
-	vars := mux.Vars(r)
-	userID := vars["user_id"]
-
-	limit := 50
-	if l := r.URL.Query().Get("limit"); l != "" {
-		limit, _ = strconv.Atoi(l)
-	}
-
-	ctx := r.Context()
-	cacheKey := fmt.Sprintf("user_history:%s:%d", userID, limit)
-
-	if cached, err := h.cache.Get(ctx, cacheKey); err == nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(cached))
-		return
-	}
-
-	results, err := h.mongo.GetUserHistory(ctx, userID, limit)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	data := mustMarshal(results)
-	h.cache.SetEX(ctx, cacheKey, string(data), 300)
-
-	w.Header().Set("Content-Type", "application/json")
-	w.Write(data)
->>>>>>> 6f851b4 (mango)
 }
 
 func (h *Handlers) topPostsViewHandler(w http.ResponseWriter, r *http.Request) {
@@ -1818,39 +1699,7 @@ func (h *Handlers) rowsToJSON(rows pgx.Rows) []map[string]interface{} {
 	return results
 }
 
-<<<<<<< HEAD
 func mustMarshal(v interface{}) []byte {
 	data, _ := json.Marshal(v)
 	return data
 }
-=======
-func (h *Handlers) rowToJSON(rows pgx.Rows) (map[string]interface{}, error) {
-	fields := rows.FieldDescriptions()
-
-	if !rows.Next() {
-		return nil, fmt.Errorf("no rows returned")
-	}
-
-	values := make([]interface{}, len(fields))
-	valuePtrs := make([]interface{}, len(fields))
-	for i := range values {
-		valuePtrs[i] = &values[i]
-	}
-
-	if err := rows.Scan(valuePtrs...); err != nil {
-		return nil, err
-	}
-
-	result := make(map[string]interface{})
-	for i, field := range fields {
-		result[string(field.Name)] = values[i]
-	}
-
-	return result, nil
-}
-
-func mustMarshal(v interface{}) []byte {
-	data, _ := json.Marshal(v)
-	return data
-}
->>>>>>> 6f851b4 (mango)
