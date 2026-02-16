@@ -52,112 +52,112 @@ services:
       start_period: 30s
 
   # генерация ключа для mongodb
-  mongo-init:
-    image: mongo:latest
-    # profiles: ["init"]
-    volumes:
-      - mongo-keyfile:/opt/mongo-config
-    command: >
-      sh -c "
-      openssl rand -base64 756 > /opt/mongo-config/keyfile &&
-      chmod 600 /opt/mongo-config/keyfile &&
-      chown 999:999 /opt/mongo-config/keyfile &&
-      echo '✅ Keyfile generated' &&
-      cat /opt/mongo-config/keyfile | base64
-      "
+  # mongo-init:
+  #   image: mongo:latest
+  #   # profiles: ["init"]
+  #   volumes:
+  #     - mongo-keyfile:/opt/mongo-config
+  #   command: >
+  #     sh -c "
+  #     openssl rand -base64 756 > /opt/mongo-config/keyfile &&
+  #     chmod 600 /opt/mongo-config/keyfile &&
+  #     chown 999:999 /opt/mongo-config/keyfile &&
+  #     echo '✅ Keyfile generated' &&
+  #     cat /opt/mongo-config/keyfile | base64
+  #     "
 
-  mongodb:
-    image: mongo:7
-    container_name: mongodb
-    environment:
-      MONGO_INITDB_ROOT_USERNAME: admin
-      MONGO_INITDB_ROOT_PASSWORD: mongopass
-      MONGO_INITDB_DATABASE: news_aggregator
-    ports:
-      - "27017:27017"
-    volumes:
-      - mongodb_data:/data/db
-      - mongo-keyfile:/opt/mongo-config
-      - ./db/mongo-init-replica-set.js:/docker-entrypoint-initdb.d/init-replica-set.js:ro
-    command: 
-      - bash
-      - -c
-      - |
-        # Установить правильные права на файл ключа
-        # chmod 600 /opt/mongo-config/keyfile
-        # chown 999:999 /opt/mongo-config/keyfile
-        exec mongod --auth --bind_ip_all --replSet rs0 --keyFile /opt/mongo-config/keyfile
-        # Подождать пока MongoDB запустится
-        sleep 10
+  # mongodb:
+  #   image: mongo:7
+  #   container_name: mongodb
+  #   environment:
+  #     MONGO_INITDB_ROOT_USERNAME: admin
+  #     MONGO_INITDB_ROOT_PASSWORD: mongopass
+  #     MONGO_INITDB_DATABASE: news_aggregator
+  #   ports:
+  #     - "27017:27017"
+  #   volumes:
+  #     - mongodb_data:/data/db
+  #     - mongo-keyfile:/opt/mongo-config
+  #     - ./db/mongo-init-replica-set.js:/docker-entrypoint-initdb.d/init-replica-set.js:ro
+  #   command: 
+  #     - bash
+  #     - -c
+  #     - |
+  #       # Установить правильные права на файл ключа
+  #       # chmod 600 /opt/mongo-config/keyfile
+  #       # chown 999:999 /opt/mongo-config/keyfile
+  #       exec mongod --auth --bind_ip_all --replSet rs0 --keyFile /opt/mongo-config/keyfile
+  #       # Подождать пока MongoDB запустится
+  #       sleep 10
         
-        # Инициализировать реплика-сет
-        echo "Initializing replica set..."
-        mongosh --username admin --password mongopass --file /docker-entrypoint-initdb.d/init-replica-set.js
-    depends_on:
-      mongo-init:
-        condition: service_completed_successfully
-    healthcheck:
-      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/admin --quiet --username admin --password mongopass
-      interval: 10s
-      timeout: 10s
-      retries: 5
-      start_period: 40s
+  #       # Инициализировать реплика-сет
+  #       echo "Initializing replica set..."
+  #       mongosh --username admin --password mongopass --file /docker-entrypoint-initdb.d/init-replica-set.js
+  #   depends_on:
+  #     mongo-init:
+  #       condition: service_completed_successfully
+  #   healthcheck:
+  #     test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/admin --quiet --username admin --password mongopass
+  #     interval: 10s
+  #     timeout: 10s
+  #     retries: 5
+  #     start_period: 40s
 
-  mongodb-secondary-1:
-    image: mongo:7
-    container_name: mongodb-secondary-1
-    environment:
-      MONGO_INITDB_ROOT_USERNAME: admin
-      MONGO_INITDB_ROOT_PASSWORD: mongopass
-    ports:
-      - "27018:27017"
-    volumes:
-      - mongodb_secondary1_data:/data/db
-      - mongo-keyfile:/opt/mongo-config
-    command: 
-      - bash
-      - -c
-      - |
-        # Установить правильные права на файл ключа
-        chmod 600 /opt/mongo-config/keyfile
-        chown 999:999 /opt/mongo-config/keyfile
-        exec mongod --auth --bind_ip_all --replSet rs0 --keyFile /opt/mongo-config/keyfile
-    depends_on:
-      - mongodb
-    healthcheck:
-      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/admin --quiet --username admin --password mongopass
-      interval: 10s
-      timeout: 10s
-      retries: 5
-      start_period: 40s
+  # mongodb-secondary-1:
+  #   image: mongo:7
+  #   container_name: mongodb-secondary-1
+  #   environment:
+  #     MONGO_INITDB_ROOT_USERNAME: admin
+  #     MONGO_INITDB_ROOT_PASSWORD: mongopass
+  #   ports:
+  #     - "27018:27017"
+  #   volumes:
+  #     - mongodb_secondary1_data:/data/db
+  #     - mongo-keyfile:/opt/mongo-config
+  #   command: 
+  #     - bash
+  #     - -c
+  #     - |
+  #       # Установить правильные права на файл ключа
+  #       chmod 600 /opt/mongo-config/keyfile
+  #       chown 999:999 /opt/mongo-config/keyfile
+  #       exec mongod --auth --bind_ip_all --replSet rs0 --keyFile /opt/mongo-config/keyfile
+  #   depends_on:
+  #     - mongodb
+  #   healthcheck:
+  #     test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/admin --quiet --username admin --password mongopass
+  #     interval: 10s
+  #     timeout: 10s
+  #     retries: 5
+  #     start_period: 40s
 
-  mongodb-secondary-2:
-    image: mongo:7
-    container_name: mongodb-secondary-2
-    environment:
-      MONGO_INITDB_ROOT_USERNAME: admin
-      MONGO_INITDB_ROOT_PASSWORD: mongopass
-    ports:
-      - "27019:27017"
-    volumes:
-      - mongodb_secondary2_data:/data/db
-      - mongo-keyfile:/opt/mongo-config
-    command: 
-      - bash
-      - -c
-      - |
-        # Установить правильные права на файл ключа
-        chmod 600 /opt/mongo-config/keyfile
-        chown 999:999 /opt/mongo-config/keyfile
-        exec mongod --auth --bind_ip_all --replSet rs0 --keyFile /opt/mongo-config/keyfile
-    depends_on:
-      - mongodb
-    healthcheck:
-      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/admin --quiet --username admin --password mongopass
-      interval: 10s
-      timeout: 10s
-      retries: 5
-      start_period: 40s
+  # mongodb-secondary-2:
+  #   image: mongo:7
+  #   container_name: mongodb-secondary-2
+  #   environment:
+  #     MONGO_INITDB_ROOT_USERNAME: admin
+  #     MONGO_INITDB_ROOT_PASSWORD: mongopass
+  #   ports:
+  #     - "27019:27017"
+  #   volumes:
+  #     - mongodb_secondary2_data:/data/db
+  #     - mongo-keyfile:/opt/mongo-config
+  #   command: 
+  #     - bash
+  #     - -c
+  #     - |
+  #       # Установить правильные права на файл ключа
+  #       chmod 600 /opt/mongo-config/keyfile
+  #       chown 999:999 /opt/mongo-config/keyfile
+  #       exec mongod --auth --bind_ip_all --replSet rs0 --keyFile /opt/mongo-config/keyfile
+  #   depends_on:
+  #     - mongodb
+  #   healthcheck:
+  #     test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/admin --quiet --username admin --password mongopass
+  #     interval: 10s
+  #     timeout: 10s
+  #     retries: 5
+  #     start_period: 40s
 
   redis:
     image: redis:7-alpine
@@ -185,11 +185,11 @@ services:
       db-master:
         condition: service_healthy
       db-replica:
-        condition: service_healthy
-      mongodb:
+      #   condition: service_healthy
+      # mongodb:
         condition: service_healthy
     environment:
-      - MONGODB_URI=mongodb://news_app:app_password@mongodb:27017/news_aggregator?authSource=news_aggregator
+      # - MONGODB_URI=mongodb://news_app:app_password@mongodb:27017/news_aggregator?authSource=news_aggregator
       - POSTGRES_MASTER=host=db-master port=5432 dbname=news_db user=news_user password=news_pass sslmode=disable
       - POSTGRES_REPLICA=host=db-replica port=5432 dbname=news_db user=news_user password=news_pass sslmode=disable
       - REDIS_ADDR=redis:6379
@@ -270,21 +270,125 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  neo4j:
+    image: neo4j:enterprise
+    container_name: neo4j
+    ports:
+      - "7474:7474"  
+      - "7687:7687"
+      - "2004:2004" 
+    
+    environment:
+      - NEO4J_AUTH=neo4j/test12345
+      - NEO4J_ACCEPT_LICENSE_AGREEMENT=yes
+      
+      - NEO4J_server_memory_heap_initial__size=512m
+      - NEO4J_server_memory_heap_max__size=2G
+      
+      - NEO4J_server_metrics_enabled=true
+      - NEO4J_server_metrics_prometheus_enabled=true
+      - NEO4J_server_metrics_prometheus_endpoint=0.0.0.0:2004
+
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+      - ./import:/var/lib/neo4j/import
+      - ./db/init_full_neo4j.cypher:/init/init.cypher:ro
+      - ./backups:/backups
+    
+    command: ["neo4j", "console"]
+
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "cypher-shell", "-u", "neo4j", "-p", "test12345", "RETURN 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+
+  neo4j-init:
+    image: neo4j:enterprise
+    container_name: neo4j-init
+    depends_on:
+      neo4j:
+        condition: service_healthy
+    volumes:
+      - ./db/init_full_neo4j.cypher:/init.cypher:ro
+    command: |
+      bash -c "
+      echo '========================================='
+      echo '    NEO4J FULL INITIALIZATION SERVICE'
+      echo '========================================='
+      
+      echo '⏳ Waiting for Neo4j to be ready...'
+      sleep 10
+      
+      echo '🔍 Checking if initialization is needed...'
+      if cypher-shell -u neo4j -p test12345 -a bolt://neo4j:7687 'SHOW USERS' 2>&1 | grep -q reader; then
+        echo '✅ Database already initialized, checking data...'
+        
+        # Проверяем, есть ли тестовые данные
+        STATS=\$(cypher-shell -u neo4j -p test12345 -a bolt://neo4j:7687 '
+          MATCH (u:User) RETURN count(u) as users
+        ')
+        
+        if [[ \$STATS == *\"10\"* ]]; then
+          echo '✅ Test data present, exiting'
+          exit 0
+        else
+          echo '⚠️  Database initialized but no test data, running full init...'
+        fi
+      fi
+      
+      echo '📝 Running full initialization script...'
+      echo '   This will create:'
+      echo '   - Users, Authors, Editors'
+      echo '   - Categories, Tags, Sources'
+      echo '   - 20+ Articles'
+      echo '   - 100+ Relationships'
+      echo ''
+      
+      if cypher-shell -u neo4j -p test12345 -a bolt://neo4j:7687 -f /init.cypher; then
+        echo ''
+        echo '✅ Initialization successful!'
+        echo ''
+        echo '📊 Verification:'
+        echo '----------------'
+        cypher-shell -u neo4j -p test12345 -a bolt://neo4j:7687 '
+          MATCH (u:User) RETURN "👥 Users: " + count(u) as stats
+          UNION ALL
+          MATCH (a:Author) RETURN "✍️  Authors: " + count(a)
+          UNION ALL
+          MATCH (art:Article) RETURN "📰 Articles: " + count(art)
+          UNION ALL
+          MATCH ()-[r]->() RETURN "🔗 Relationships: " + count(r)
+        '
+        echo '========================================='
+        echo '✅ Neo4j is fully initialized and ready!'
+      else
+        echo '❌ Initialization failed!'
+        exit 1
+      fi
+      "
+    restart: "no"
+  
 volumes:
   postgres_master_data:
     driver: local
   postgres_replica_data:
     driver: local
-  mongodb_data:
-    driver: local
+  # mongodb_data:
+  #   driver: local
   redis_data:
     driver: local
+  neo4j_data:
+  neo4j_logs:
   
-  mongo-keyfile:
+  # mongo-keyfile:
 
-  # репликация
-  mongodb_secondary1_data:
-  mongodb_secondary2_data:
-  # репликация -------------------
+  # # репликация
+  # mongodb_secondary1_data:
+  # mongodb_secondary2_data:
+  # # репликация -------------------
 
 
