@@ -317,54 +317,28 @@ services:
     command: |
       bash -c "
       echo '========================================='
-      echo '    NEO4J FULL INITIALIZATION SERVICE'
+      echo '    NEO4J INITIALIZATION SERVICE'
       echo '========================================='
       
-      echo '⏳ Waiting for Neo4j to be ready...'
-      sleep 10
+      echo '⏳ Waiting for Neo4j...'
+      sleep 15
       
-      echo '🔍 Checking if initialization is needed...'
-      if cypher-shell -u neo4j -p test12345 -a bolt://neo4j:7687 'SHOW USERS' 2>&1 | grep -q reader; then
-        echo '✅ Database already initialized, checking data...'
-        
-        # Проверяем, есть ли тестовые данные
-        STATS=\$(cypher-shell -u neo4j -p test12345 -a bolt://neo4j:7687 '
-          MATCH (u:User) RETURN count(u) as users
-        ')
-        
-        if [[ \$STATS == *\"10\"* ]]; then
-          echo '✅ Test data present, exiting'
-          exit 0
-        else
-          echo '⚠️  Database initialized but no test data, running full init...'
-        fi
-      fi
-      
-      echo '📝 Running full initialization script...'
-      echo '   This will create:'
-      echo '   - Users, Authors, Editors'
-      echo '   - Categories, Tags, Sources'
-      echo '   - 20+ Articles'
-      echo '   - 100+ Relationships'
-      echo ''
+      echo '🚀 Running initialization script...'
       
       if cypher-shell -u neo4j -p test12345 -a bolt://neo4j:7687 -f /init.cypher; then
         echo ''
-        echo '✅ Initialization successful!'
+        echo '✅ Initialization completed!'
         echo ''
-        echo '📊 Verification:'
-        echo '----------------'
+        echo '📊 Statistics:'
         cypher-shell -u neo4j -p test12345 -a bolt://neo4j:7687 '
-          MATCH (u:User) RETURN "👥 Users: " + count(u) as stats
+          MATCH (u:User) RETURN \"Users: \" + count(u)
           UNION ALL
-          MATCH (a:Author) RETURN "✍️  Authors: " + count(a)
+          MATCH (a:Author) RETURN \"Authors: \" + count(a)
           UNION ALL
-          MATCH (art:Article) RETURN "📰 Articles: " + count(art)
+          MATCH (art:Article) RETURN \"Articles: \" + count(art)
           UNION ALL
-          MATCH ()-[r]->() RETURN "🔗 Relationships: " + count(r)
+          MATCH ()-[r]->() RETURN \"Relationships: \" + count(r)
         '
-        echo '========================================='
-        echo '✅ Neo4j is fully initialized and ready!'
       else
         echo '❌ Initialization failed!'
         exit 1
