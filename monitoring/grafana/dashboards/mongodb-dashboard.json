@@ -1,0 +1,27 @@
+{
+  "dashboard": {
+    "title": "MongoDB Monitoring",
+    "panels": [
+      {
+        "title": "MongoDB Connections",
+        "targets": [
+          {
+            "expr": "mongodb_connections{state=\"current\"}",
+            "legendFormat": "Current"
+          }
+        ],
+        "type": "stat"
+      },
+      {
+        "title": "MongoDB Operations",
+        "targets": [
+          {
+            "expr": "rate(mongodb_opcounters[5m])",
+            "legendFormat": "{{type}}"
+          }
+        ],
+        "type": "graph"
+      }
+    ]
+  }
+}

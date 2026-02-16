@@ -1,0 +1,36 @@
+groups:
+  - name: database_alerts
+    rules:
+      # PostgreSQL alerts
+      - alert: PostgreSQLHighConnections
+        expr: pg_stat_database_numbackends > 100
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High PostgreSQL connections on {{ $labels.instance }}"
+          
+      - alert: PostgreSQLDown
+        expr: up{job="postgres-exporter"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "PostgreSQL exporter down on {{ $labels.instance }}"
+      
+      # MongoDB alerts
+      - alert: MongoDBHighConnections
+        expr: mongodb_connections{state="current"} > 100
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High MongoDB connections on {{ $labels.instance }}"
+          
+      - alert: MongoDBDown
+        expr: up{job="mongodb-exporter"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "MongoDB exporter down on {{ $labels.instance }}"

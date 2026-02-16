@@ -1,0 +1,88 @@
+{
+  "dashboard": {
+    "title": "News Aggregator Monitoring",
+    "tags": ["postgres", "mongodb", "redis", "go"],
+    "timezone": "browser",
+    "panels": [
+      {
+        "title": "PostgreSQL - Connections",
+        "type": "stat",
+        "targets": [{
+          "expr": "sum(pg_stat_database_numbackends{datname=\"news_db\"})",
+          "legendFormat": "Active Connections"
+        }],
+        "gridPos": {"h": 8, "w": 8, "x": 0, "y": 0}
+      },
+      {
+        "title": "PostgreSQL - Database Size",
+        "type": "gauge",
+        "targets": [{
+          "expr": "pg_database_size_bytes{datname=\"news_db\"} / 1024 / 1024",
+          "legendFormat": "DB Size (MB)"
+        }],
+        "gridPos": {"h": 8, "w": 8, "x": 8, "y": 0}
+      },
+      {
+        "title": "PostgreSQL - Replication Lag",
+        "type": "stat",
+        "targets": [{
+          "expr": "pg_replication_lag_bytes",
+          "legendFormat": "Lag Bytes"
+        }],
+        "gridPos": {"h": 8, "w": 8, "x": 16, "y": 0}
+      },
+      {
+        "title": "MongoDB - Operations",
+        "type": "graph",
+        "targets": [{
+          "expr": "rate(mongodb_opcounters[5m])",
+          "legendFormat": "{{operation}}"
+        }],
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8}
+      },
+      {
+        "title": "MongoDB - Connections",
+        "type": "graph",
+        "targets": [{
+          "expr": "mongodb_connections{state=\"current\"}",
+          "legendFormat": "Current Connections"
+        }],
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8}
+      },
+      {
+        "title": "HTTP Requests Rate",
+        "type": "graph",
+        "targets": [{
+          "expr": "rate(http_requests_total[5m])",
+          "legendFormat": "{{method}} {{endpoint}}"
+        }],
+        "gridPos": {"h": 8, "w": 24, "x": 0, "y": 16}
+      },
+      {
+        "title": "Cache Hit/Miss Ratio",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(cache_hits_total[5m])",
+            "legendFormat": "Hits"
+          },
+          {
+            "expr": "rate(cache_misses_total[5m])",
+            "legendFormat": "Misses"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 24}
+      },
+      {
+        "title": "Database Query Rate",
+        "type": "graph",
+        "targets": [{
+          "expr": "rate(db_queries_total[5m])",
+          "legendFormat": "{{type}} {{table}}"
+        }],
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 24}
+      }
+    ],
+    "refresh": "10s"
+  }
+}

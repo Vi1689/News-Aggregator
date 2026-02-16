@@ -1,0 +1,31 @@
+{
+  "dashboard": {
+    "title": "PostgreSQL Monitoring",
+    "panels": [
+      {
+        "title": "PostgreSQL Connections",
+        "targets": [
+          {
+            "expr": "pg_stat_database_numbackends{datname!~\"template.*|postgres\"}",
+            "legendFormat": "{{datname}}"
+          }
+        ],
+        "type": "graph"
+      },
+      {
+        "title": "PostgreSQL Transactions",
+        "targets": [
+          {
+            "expr": "rate(pg_stat_database_xact_commit[5m])",
+            "legendFormat": "Commits {{datname}}"
+          },
+          {
+            "expr": "rate(pg_stat_database_xact_rollback[5m])",
+            "legendFormat": "Rollbacks {{datname}}"
+          }
+        ],
+        "type": "graph"
+      }
+    ]
+  }
+}

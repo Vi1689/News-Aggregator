@@ -1,0 +1,209 @@
+pg_database:
+  query: |
+    SELECT
+      datname,
+      pg_database_size(datname) as size_bytes,
+      numbackends as connections,
+      (SELECT count(*) FROM pg_stat_activity WHERE datname = d.datname) as active_connections,
+      (SELECT count(*) FROM pg_locks WHERE database = d.oid) as locks,
+      has_database_privilege(datname, 'CONNECT') as connectable
+    FROM pg_database d
+    WHERE datistemplate = false
+  metrics:
+    - datname:
+        usage: "LABEL"
+        description: "Database name"
+    - size_bytes:
+        usage: "GAUGE"
+        description: "Database size in bytes"
+    - connections:
+        usage: "GAUGE"
+        description: "Number of connections"
+    - active_connections:
+        usage: "GAUGE"
+        description: "Number of active connections"
+    - locks:
+        usage: "GAUGE"
+        description: "Number of locks"
+    - connectable:
+        usage: "GAUGE"
+        description: "Database is connectable (1) or not (0)"
+
+pg_replication:
+  query: |
+    SELECT
+      application_name,
+      client_addr,
+      state,
+      sync_state,
+      pg_wal_lsn_diff(pg_current_wal_lsn(), replay_lsn) as replication_lag_bytes,
+      EXTRACT(EPOCH FROM (now() - replay_lag)) as replay_lag_seconds
+    FROM pg_stat_replication
+  metrics:
+    - application_name:
+        usage: "LABEL"
+        description: "Application name"
+    - client_addr:
+        usage: "LABEL"
+        description: "Client address"
+    - state:
+        usage: "LABEL"
+        description: "Replication state"
+    - sync_state:
+        usage: "LABEL"
+        description: "Synchronization state"
+    - replication_lag_bytes:
+        usage: "GAUGE"
+        description: "Replication lag in bytes"
+    - replay_lag_seconds:
+        usage: "GAUGE"
+        description: "Replay lag in seconds"
+
+pg_table_statistics:
+  query: |
+    SELECT
+      schemaname,
+      relname,
+      seq_scan,
+      seq_tup_read,
+      idx_scan,
+      idx_tup_fetch,
+      n_tup_ins,
+      n_tup_upd,
+      n_tup_del,
+      n_tup_hot_upd,
+      n_live_tup,
+      n_dead_tup,
+      last_vacuum,
+      last_autovacuum,
+      last_analyze,
+      last_autoanalyze
+    FROM pg_stat_user_tables
+  metrics:
+    - schemaname:
+        usage: "LABEL"
+        description: "Schema name"
+    - relname:
+        usage: "LABEL"
+        description: "Table name"
+    - seq_scan:
+        usage: "COUNTER"
+        description: "Number of sequential scans"
+    - seq_tup_read:
+        usage: "COUNTER"
+        description: "Number of tuples read sequentially"
+    - idx_scan:
+        usage: "COUNTER"
+        description: "Number of index scans"
+    - idx_tup_fetch:
+        usage: "COUNTER"
+        description: "Number of index tuples fetched"
+    - n_tup_ins:
+        usage: "COUNTER"
+        description: "Number of tuples inserted"
+    - n_tup_upd:
+        usage: "COUNTER"
+        description: "Number of tuples updated"
+    - n_tup_del:
+        usage: "COUNTER"
+        description: "Number of tuples deleted"
+    - n_tup_hot_upd:
+        usage: "COUNTER"
+        description: "Number of HOT updates"
+    - n_live_tup:
+        usage: "GAUGE"
+        description: "Number of live tuples"
+    - n_dead_tup:
+        usage: "GAUGE"
+        description: "Number of dead tuples"
+
+pg_query_statistics:
+  query: |
+    SELECT
+      query,
+      calls,
+      total_time,
+      mean_time,
+      rows,
+      shared_blks_hit,
+      shared_blks_read,
+      shared_blks_dirtied,
+      shared_blks_written,
+      local_blks_hit,
+      local_blks_read,
+      local_blks_dirtied,
+      local_blks_written
+    FROM pg_stat_statements
+    WHERE query NOT LIKE '%pg_stat_statements%'
+    ORDER BY total_time DESC
+    LIMIT 50
+  metrics:
+    - query:
+        usage: "LABEL"
+        description: "Query text"
+    - calls:
+        usage: "COUNTER"
+        description: "Number of times executed"
+    - total_time:
+        usage: "GAUGE"
+        description: "Total time spent in milliseconds"
+    - mean_time:
+        usage: "GAUGE"
+        description: "Mean time in milliseconds"
+    - rows:
+        usage: "COUNTER"
+        description: "Total rows retrieved or affected"
+
+pg_connections:
+  query: |
+    SELECT
+      state,
+      COUNT(*) as count,
+      COUNT(*) FILTER (WHERE wait_event_type IS NOT NULL) as waiting,
+      MAX(EXTRACT(EPOCH FROM (now() - query_start))) as max_query_age
+    FROM pg_stat_activity
+    WHERE pid <> pg_backend_pid()
+    GROUP BY state
+  metrics:
+    - state:
+        usage: "LABEL"
+        description: "Connection state"
+    - count:
+        usage: "GAUGE"
+        description: "Number of connections in this state"
+    - waiting:
+        usage: "GAUGE"
+        description: "Number of waiting connections"
+    - max_query_age:
+        usage: "GAUGE"
+        description: "Maximum query age in seconds"
+
+news_aggregator_stats:
+  query: |
+    SELECT
+      'posts' as table_name,
+      COUNT(*) as row_count,
+      MAX(created_at) as last_insert
+    FROM posts
+    UNION ALL
+    SELECT
+      'comments' as table_name,
+      COUNT(*) as row_count,
+      MAX(created_at) as last_insert
+    FROM comments
+    UNION ALL
+    SELECT
+      'users' as table_name,
+      COUNT(*) as row_count,
+      MAX(created_at) as last_insert
+    FROM users
+  metrics:
+    - table_name:
+        usage: "LABEL"
+        description: "Table name"
+    - row_count:
+        usage: "GAUGE"
+        description: "Number of rows in table"
+    - last_insert:
+        usage: "GAUGE"
+        description: "Timestamp of last insert (epoch)"
