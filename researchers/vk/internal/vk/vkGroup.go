@@ -11,15 +11,19 @@ import (
 	"time"
 )
 
-// Структура для группы
+// Структура для группы (расширенная с администраторами)
 type VKGroup struct {
-	ID           int    `json:"id"`
-	Name         string `json:"name"`
-	ScreenName   string `json:"screen_name"`
-	MembersCount int    `json:"members_count"`
+	ID           int        `json:"id"`
+	Name         string     `json:"name"`
+	ScreenName   string     `json:"screen_name"`
+	MembersCount int        `json:"members_count"`
+	Contacts     []struct { // Администраторы/контакты группы
+		UserID int    `json:"user_id"`
+		Desc   string `json:"desc"`
+	} `json:"contacts"`
 }
 
-// Структура ответа
+// Структура ответа от VK API
 type VKGroupsResponse struct {
 	Response struct {
 		Count int       `json:"count"`
@@ -27,182 +31,140 @@ type VKGroupsResponse struct {
 	} `json:"response"`
 }
 
-// Поиск популярных групп
-func GetTopPopularGroups(accessToken string, count int, offset int) ([]VKGroup, error) {
-    // Ограничиваем количество
-    if count > 20 {
-        count = 20
-        fmt.Printf("Reducing group count to %d\n", count)
-    }
-    
-    baseURL := "https://api.vk.com/method/groups.search"
-    params := url.Values{}
-    params.Set("access_token", accessToken)
-    params.Set("v", "5.199")
-    params.Set("q", "новости")
-    params.Set("type", "group")
-    params.Set("sort", "6")
-    params.Set("count", strconv.Itoa(count))
-    params.Set("offset", strconv.Itoa(offset))
-    params.Set("fields", "members_count,name,screen_name")
-
-    fullURL := baseURL + "?" + params.Encode()
-    
-    // Добавляем задержку
-    time.Sleep(500 * time.Millisecond)
-    
-    resp, err := http.Get(fullURL)
-    if err != nil {
-        return nil, fmt.Errorf("HTTP request error: %w", err)
-    }
-    defer resp.Body.Close()
-
-    if resp.StatusCode != http.StatusOK {
-        body, _ := io.ReadAll(resp.Body)
-        return nil, fmt.Errorf("VK API error %d: %s", resp.StatusCode, string(body))
-    }
-
-    body, err := io.ReadAll(resp.Body)
-    if err != nil {
-        return nil, fmt.Errorf("read response error: %w", err)
-    }
-
-    var vkResp VKGroupsResponse
-    if err := json.Unmarshal(body, &vkResp); err != nil {
-        return nil, fmt.Errorf("JSON parse error: %w", err)
-    }
-
-    fmt.Printf("Found %d groups, got %d items\n", vkResp.Response.Count, len(vkResp.Response.Items))
-    
-    // Фильтруем группы без названия
-    var filteredGroups []VKGroup
-    for _, group := range vkResp.Response.Items {
-        if group.Name != "" && group.MembersCount > 0 {
-            // Убедимся, что screen_name не пустой
-            if group.ScreenName == "" {
-                group.ScreenName = strconv.Itoa(group.ID)
-            }
-            filteredGroups = append(filteredGroups, group)
-        }
-    }
-
-    return filteredGroups, nil
+// Структура ответа от VK API для groups.getById
+type VKGroupsByIdResponse struct {
+	Response []VKGroup `json:"response"`
 }
 
-// Получение групп по названиям
+// Структура ответа от VK API для groups.search
+type VKGroupsSearchResponse struct {
+	Response struct {
+		Count int       `json:"count"`
+		Items []VKGroup `json:"items"`
+	} `json:"response"`
+}
+
+// Функция для поиска n самых популярных групп VK
+func GetTopPopularGroups(accessToken string, count int, offset int) ([]VKGroup, error) {
+	// Базовый URL VK API для поиска групп
+	baseURL := "https://api.vk.com/method/groups.search"
+
+	// Параметры запроса
+	params := url.Values{}
+	params.Set("access_token", accessToken)
+	params.Set("v", "5.131")                                        // Версия API
+	params.Set("q", "")                                             // Пустой запрос для поиска всех групп
+	params.Set("type", "group")                                     // Тип: группы
+	params.Set("sort", "6")                                         // Сортировка: по количеству участников (убывание)
+	params.Set("count", strconv.Itoa(count))                        // Количество результатов
+	params.Set("offset", strconv.Itoa(offset))                      // смещение этих самых результатов
+	params.Set("fields", "members_count,name,screen_name,contacts") // Поля для получения (добавлено contacts)
+
+	// Формируем полный URL
+	fullURL := baseURL + "?" + params.Encode()
+	//fmt.Printf("%s\n", fullURL)
+
+	// Делаем HTTP GET запрос
+	resp, err := http.Get(fullURL)
+	if err != nil {
+		return nil, fmt.Errorf("ошибка запроса к VK API: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Проверяем статус ответа
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("VK API вернул ошибку: %s, тело: %s", resp.Status, string(body))
+	}
+
+	// Читаем и парсим JSON
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("ошибка чтения ответа: %w", err)
+	}
+
+	//fmt.Printf("\n===================================\nbody = %s\n===============================================\n\n", body)
+
+	var vkResp VKGroupsResponse
+	if err := json.Unmarshal(body, &vkResp); err != nil {
+		return nil, fmt.Errorf("ошибка парсинга JSON: %w", err)
+	}
+
+	// Возвращаем найденные группы (уже отсортированы по популярности)
+	return vkResp.Response.Items, nil
+}
+
+// Функция для получения групп по слайсу их screen_name
+// Функция для получения групп по полному названию (изменённая с твоей оригинальной)
 func GetGroupsByFullNames(accessToken string, names string, n int) ([]VKGroup, error) {
 	if len(names) == 0 {
-		return []VKGroup{}, nil
+		return []VKGroup{}, nil // Пустой слайс, если вход пустой
 	}
 
+	// Разбиваем строку на список названий (через запятую)
 	nameList := strings.Split(names, ",")
 	for i := range nameList {
-		nameList[i] = strings.TrimSpace(nameList[i])
+		nameList[i] = strings.TrimSpace(nameList[i]) // Убираем пробелы
 	}
 
-	var allGroups []VKGroup
+	var allGroups []VKGroup // Слайс для всех найденных групп
 
+	// Проходим по каждому названию и делаем поиск
 	for _, fullName := range nameList {
 		if len(fullName) == 0 {
-			continue
+			continue // Пропускаем пустые
 		}
 
-		// Задержка между запросами
-		time.Sleep(1 * time.Second)
-		
+		// Базовый URL VK API для поиска групп
 		baseURL := "https://api.vk.com/method/groups.search"
+
+		// Параметры запроса
 		params := url.Values{}
 		params.Set("access_token", accessToken)
-		params.Set("v", "5.199")
-		params.Set("q", fullName)
-		params.Set("type", "group")
-		params.Set("count", "5")
-		params.Set("fields", "members_count,name,screen_name,is_closed")
+		params.Set("v", "5.131")                                        // Версия API
+		params.Set("q", fullName)                                       // Запрос по названию
+		params.Set("type", "group")                                     // Тип: группы
+		params.Set("count", "20")                                       // До 20 результатов на запрос
+		params.Set("fields", "members_count,name,screen_name,contacts") // Поля (добавлено contacts)
 
+		// Формируем полный URL
 		fullURL := baseURL + "?" + params.Encode()
-		
-		// ДОБАВИМ ОТЛАДКУ
-		fmt.Printf("DEBUG: Searching group: %s\n", fullName)
-		
+		fmt.Printf("Запрос для '%s': %s\n", fullName, fullURL) // Отладка
+
+		// Задаём таймаут
 		client := &http.Client{
 			Timeout: 30 * time.Second,
 		}
 
+		// Делаем HTTP GET запрос
 		resp, err := client.Get(fullURL)
 		if err != nil {
-			fmt.Printf("DEBUG: Request error for '%s': %v\n", fullName, err)
-			continue
+			return nil, fmt.Errorf("ошибка запроса к VK API для '%s': %w", fullName, err)
 		}
 		defer resp.Body.Close()
 
+		// Проверяем статус ответа
 		if resp.StatusCode != http.StatusOK {
-			fmt.Printf("DEBUG: HTTP error %d for '%s'\n", resp.StatusCode, fullName)
-			continue
+			body, _ := io.ReadAll(resp.Body)
+			return nil, fmt.Errorf("VK API вернул ошибку для '%s': %s, тело: %s", fullName, resp.Status, string(body))
 		}
 
+		// Читаем и парсим JSON
 		body, err := io.ReadAll(resp.Body)
 		if err != nil {
-			fmt.Printf("DEBUG: Read error for '%s': %v\n", fullName, err)
-			continue
+			return nil, fmt.Errorf("ошибка чтения ответа для '%s': %w", fullName, err)
 		}
 
-		// ДОБАВИМ ПРЕВЬЮ ОТВЕТА
-		fmt.Printf("DEBUG: Response for '%s': %s\n", fullName, string(body[:min(200, len(body))]))
-		
-		var vkResp struct {
-			Response struct {
-				Count int `json:"count"`
-				Items []struct {
-					ID           int    `json:"id"`
-					Name         string `json:"name"`
-					ScreenName   string `json:"screen_name"`
-					MembersCount int    `json:"members_count"`
-					IsClosed     int    `json:"is_closed"` // 0 - открытая, 1 - закрытая, 2 - частная
-				} `json:"items"`
-			} `json:"response"`
-		}
-		
+		var vkResp VKGroupsSearchResponse
 		if err := json.Unmarshal(body, &vkResp); err != nil {
-			fmt.Printf("DEBUG: JSON parse error for '%s': %v\n", fullName, err)
-			continue
+			return nil, fmt.Errorf("ошибка парсинга JSON для '%s': %w", fullName, err)
 		}
 
-		fmt.Printf("DEBUG: Found %d groups for '%s'\n", vkResp.Response.Count, fullName)
-		
-		// Добавляем найденные группы
-		if len(vkResp.Response.Items) > 0 {
-			for _, item := range vkResp.Response.Items {
-				fmt.Printf("DEBUG: Group: ID=%d, Name='%s', ScreenName='%s', Members=%d, IsClosed=%d\n",
-					item.ID, item.Name, item.ScreenName, item.MembersCount, item.IsClosed)
-					
-				// Проверяем что группа открытая
-				if item.IsClosed == 0 {
-					group := VKGroup{
-						ID:           item.ID,
-						Name:         item.Name,
-						ScreenName:   item.ScreenName,
-						MembersCount: item.MembersCount,
-					}
-					if group.ScreenName == "" {
-						group.ScreenName = fullName
-					}
-					allGroups = append(allGroups, group)
-					fmt.Printf("DEBUG: Added OPEN group: %s (ID: %d)\n", group.Name, group.ID)
-					break // Берем первую открытую группу
-				} else {
-					fmt.Printf("DEBUG: Skipping CLOSED group: %s (IsClosed=%d)\n", item.Name, item.IsClosed)
-				}
-			}
-		}
+		// Добавляем найденные группы в общий слайс
+		allGroups = append(allGroups, vkResp.Response.Items[:n]...)
 	}
 
-	fmt.Printf("Found %d groups by names\n", len(allGroups))
+	// Возвращаем все найденные группы
+	fmt.Printf("Всего найдено групп: %d\n", len(allGroups))
 	return allGroups, nil
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
