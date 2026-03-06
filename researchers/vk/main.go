@@ -6,10 +6,10 @@ import (
 	"time"
 	"strings" // ДОБАВИТЬ ЭТУ СТРОКУ
 
-	"researcher-vk/internal/config"
-	"researcher-vk/internal/sendRequests"
-	"researcher-vk/internal/vk"
-	_ "researcher-vk/internal/vkToken"
+	"researchers/internal/config"
+	"researchers/vk/internal/sendRequests"
+	"researchers/vk/internal/vk"
+	_ "researchers/vk/internal/vkToken"
 )
 
 var groupOffset int
