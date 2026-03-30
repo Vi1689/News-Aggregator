@@ -1,0 +1,26 @@
+FROM golang:1.22-alpine AS builder
+
+WORKDIR /app
+
+# Копируем go.mod и go.sum
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Копируем исходный код
+COPY . .
+
+# Собираем consumer_pg
+RUN go build -o consumer_pg ./cmd/consumer_pg
+
+# Финальный образ
+FROM alpine:latest
+
+RUN apk --no-cache add ca-certificates postgresql-client
+
+WORKDIR /root/
+
+# Копируем бинарник из builder
+COPY --from=builder /app/consumer_pg .
+
+# Запускаем
+CMD ["./consumer_pg"]

@@ -1,0 +1,73 @@
+{
+  "type": "record",
+  "name": "NewsEvent",
+  "namespace": "com.newsaggregator.events",
+  "doc": "Unified event schema for news aggregator",
+  "fields": [
+    {
+      "name": "eventId",
+      "type": "string",
+      "doc": "UUID v4 - unique event identifier"
+    },
+    {
+      "name": "eventType",
+      "type": {
+        "type": "enum",
+        "name": "EventType",
+        "symbols": [
+          "POST_CREATED",
+          "POST_UPDATED",
+          "COMMENT_ADDED",
+          "TAG_TRENDING",
+          "POST_LIKED",
+          "CHANNEL_SUBSCRIBED"
+        ]
+      },
+      "doc": "Type of business event"
+    },
+    {
+      "name": "entityId",
+      "type": "string",
+      "doc": "ID of the primary entity (post_id, comment_id, etc.)"
+    },
+    {
+      "name": "timestamp",
+      "type": "long",
+      "logicalType": "timestamp-millis",
+      "doc": "Event creation time in epoch milliseconds"
+    },
+    {
+      "name": "source",
+      "type": "string",
+      "doc": "Service that generated the event: jmeter, faststream-api, scheduler"
+    },
+    {
+      "name": "version",
+      "type": "string",
+      "default": "1.0",
+      "doc": "Schema version for forward compatibility"
+    },
+    {
+      "name": "metadata",
+      "type": {
+        "type": "record",
+        "name": "EventMetadata",
+        "fields": [
+          { "name": "correlationId", "type": "string" },
+          { "name": "userId",        "type": ["null", "string"], "default": null },
+          { "name": "channelId",     "type": ["null", "int"],    "default": null },
+          { "name": "ipAddress",     "type": ["null", "string"], "default": null },
+          { "name": "userAgent",     "type": ["null", "string"], "default": null }
+        ]
+      }
+    },
+    {
+      "name": "payload",
+      "type": {
+        "type": "map",
+        "values": ["null", "string", "int", "long", "boolean", "float"]
+      },
+      "doc": "Event-specific data as key-value map"
+    }
+  ]
+}

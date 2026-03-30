@@ -1,0 +1,60 @@
+syntax = "proto3";
+
+package com.newsaggregator.events;
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/struct.proto";
+
+// Unified event envelope — same structure as Avro schema
+message NewsEvent {
+  string event_id         = 1;
+  EventType event_type    = 2;
+  string entity_id        = 3;
+  google.protobuf.Timestamp timestamp = 4;
+  string source           = 5;
+  string version          = 6;
+  EventMetadata metadata  = 7;
+  google.protobuf.Struct payload = 8;  // flexible key-value payload
+}
+
+enum EventType {
+  EVENT_TYPE_UNSPECIFIED  = 0;
+  POST_CREATED            = 1;
+  POST_UPDATED            = 2;
+  COMMENT_ADDED           = 3;
+  TAG_TRENDING            = 4;
+  POST_LIKED              = 5;
+  CHANNEL_SUBSCRIBED      = 6;
+}
+
+message EventMetadata {
+  string correlation_id   = 1;
+  string user_id          = 2;  // optional, empty string = absent
+  int32  channel_id       = 3;
+  string ip_address       = 4;
+  string user_agent       = 5;
+}
+
+// Specific payload messages for type safety (used inside payload field)
+message PostCreatedPayload {
+  int32  post_id      = 1;
+  string title        = 2;
+  int32  author_id    = 3;
+  int32  channel_id   = 4;
+  repeated string tags = 5;
+  string content_hash = 6;
+}
+
+message CommentAddedPayload {
+  int32  comment_id       = 1;
+  int32  post_id          = 2;
+  string nickname         = 3;
+  string text_preview     = 4;  // first 200 chars
+  int32  parent_comment_id = 5;
+}
+
+message TagTrendingPayload {
+  string tag_name     = 1;
+  int32  post_count   = 2;   // posts in last hour
+  float  trend_score  = 3;
+}
