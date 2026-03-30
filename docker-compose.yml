@@ -328,24 +328,13 @@ services:
       if cypher-shell -u neo4j -p test12345 -a bolt://neo4j:7687 -f /init.cypher; then
         echo ''
         echo '✅ Initialization completed!'
-        echo ''
-        echo '📊 Statistics:'
-        cypher-shell -u neo4j -p test12345 -a bolt://neo4j:7687 '
-          MATCH (u:User) RETURN \"Users: \" + count(u)
-          UNION ALL
-          MATCH (a:Author) RETURN \"Authors: \" + count(a)
-          UNION ALL
-          MATCH (art:Article) RETURN \"Articles: \" + count(art)
-          UNION ALL
-          MATCH ()-[r]->() RETURN \"Relationships: \" + count(r)
-        '
       else
         echo '❌ Initialization failed!'
         exit 1
       fi
       "
     restart: "no"
-  
+
 volumes:
   postgres_master_data:
     driver: local

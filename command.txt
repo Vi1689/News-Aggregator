@@ -252,3 +252,315 @@ print("\n📈 Ожидаемые улучшения:");
 print("   • GetUserHistory: -70% времени (23ms → ~7ms)");
 print("   • MaterializeTopPostsView: -60% времени (572ms → ~230ms)");
 print("   • Большие агрегации: Более стабильная работа");
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// Топ-20 рекомендаций новостей для пользователя с id = 1
+MATCH (target:User {id: 1})
+
+// 1. Собираем все положительные взаимодействия пользователя
+OPTIONAL MATCH (target)-[:LIKED]->(likedArticles:Article)
+OPTIONAL MATCH (target)-[:FAVORITED]->(favoritedArticles:Article)
+OPTIONAL MATCH (target)-[:COMMENTED]->(commentedArticles:Article)
+WITH target, 
+     collect(DISTINCT likedArticles) + 
+     collect(DISTINCT favoritedArticles) + 
+     collect(DISTINCT commentedArticles) AS positiveArticles
+
+// 2. Получаем теги, которые нравятся пользователю
+OPTIONAL MATCH (positive:Article)-[:TAGGED_WITH]->(preferredTag:Tag)
+WHERE positive IN positiveArticles
+WITH target, positiveArticles, collect(DISTINCT preferredTag) AS preferredTags
+
+// 3. Получаем категории, на которые подписан пользователь
+OPTIONAL MATCH (target)-[:SUBSCRIBED_TO]->(preferredCategory:Category)
+WITH target, positiveArticles, preferredTags, collect(DISTINCT preferredCategory) AS preferredCategories
+
+// 4. Получаем историю чтения пользователя
+OPTIONAL MATCH (target)-[:READ]->(readArticle:Article)
+WITH target, positiveArticles, preferredTags, preferredCategories, 
+     collect(DISTINCT readArticle) AS readHistory
+
+// 5. Находим похожих пользователей (за 30 дней)
+OPTIONAL MATCH (target)-[:READ]->(common:Article)<-[:READ]-(similarUser:User)
+WHERE similarUser.id <> target.id
+  AND common.created_at >= datetime() - duration({days: 30})
+WITH target, positiveArticles, preferredTags, preferredCategories, readHistory,
+     collect(DISTINCT similarUser) AS similarUsers
+
+// 6. Получаем статьи от похожих пользователей
+OPTIONAL MATCH (similar:User)-[:READ]->(collabArticle:Article)
+WHERE similar IN similarUsers
+  AND collabArticle.is_published = true
+  AND collabArticle.created_at >= datetime() - duration({days: 7})
+  AND NOT collabArticle IN readHistory
+  AND NOT collabArticle IN positiveArticles
+WITH target, preferredTags, preferredCategories, 
+     collect(DISTINCT collabArticle) AS collaborativeArticles
+
+// 7. Основной сбор кандидатов - ТОЛЬКО за последние 7 дней
+MATCH (candidate:Article)
+WHERE candidate.is_published = true
+  AND candidate.created_at >= datetime() - duration({days: 7})
+  AND NOT (target)-[:READ]->(candidate)
+  AND NOT (target)-[:LIKED]->(candidate)
+  AND NOT (target)-[:FAVORITED]->(candidate)
+
+// 8. Получаем теги и категории кандидата
+OPTIONAL MATCH (candidate)-[:TAGGED_WITH]->(tag:Tag)
+OPTIONAL MATCH (candidate)-[:IN_CATEGORY]->(category:Category)
+
+WITH candidate,
+     collect(DISTINCT tag) AS candidateTags,
+     collect(DISTINCT category) AS candidateCategories,
+     preferredTags, preferredCategories, collaborativeArticles
+
+// 9. ВЫЧИСЛЯЕМ СКОР
+WITH candidate,
+     REDUCE(score = 0, t IN preferredTags | 
+            CASE WHEN t IN candidateTags THEN score + 5 ELSE score END) AS tagScore,
+     
+     REDUCE(score = 0, c IN preferredCategories | 
+            CASE WHEN c IN candidateCategories THEN score + 4 ELSE score END) AS categoryScore,
+     
+     CASE WHEN candidate IN collaborativeArticles THEN 10 ELSE 0 END AS collaborativeScore,
+     
+     (coalesce(candidate.views, 0) / 2000.0) * 0.3 + 
+     (coalesce(candidate.likes, 0) / 200.0) * 0.5 AS popularityScore
+
+// 10. Финальный скор
+WITH candidate, 
+     (tagScore + categoryScore + collaborativeScore + popularityScore) AS finalScore,
+     tagScore, categoryScore, collaborativeScore, popularityScore
+
+WHERE finalScore > 0
+
+// 11. Возвращаем топ-20
+RETURN 
+    candidate.id AS article_id,
+    candidate.title AS title,
+    candidate.created_at AS published_date,
+    candidate.views AS views,
+    candidate.likes AS likes,
+    ROUND(finalScore, 2) AS total_score,
+    ROUND(tagScore, 2) AS liked_tags_score,
+    ROUND(categoryScore, 2) AS categories_score,
+    ROUND(collaborativeScore, 2) AS similar_users_score,
+    ROUND(popularityScore, 2) AS popularity_score,
+    CASE 
+        WHEN tagScore > 0 AND collaborativeScore > 0 AND categoryScore > 0 
+            THEN '✅ Все условия'
+        WHEN tagScore > 0 AND collaborativeScore > 0 
+            THEN '✅ Любимые теги + Похожие пользователи'
+        WHEN tagScore > 0 AND categoryScore > 0 
+            THEN '✅ Любимые теги + Подписки'
+        WHEN collaborativeScore > 0 AND categoryScore > 0 
+            THEN '✅ Похожие пользователи + Подписки'
+        WHEN tagScore > 0 
+            THEN '✅ Только любимые теги'
+        WHEN collaborativeScore > 0 
+            THEN '✅ Только похожие пользователи'
+        WHEN categoryScore > 0 
+            THEN '✅ Только подписки'
+        ELSE '📌 Без совпадений'
+    END AS matching_conditions
+ORDER BY finalScore DESC
+LIMIT 20
+
+
+
+// Создаем свежие статьи за последние 7 дней
+FOREACH (id IN range(21, 30) |
+  CREATE (art:Article {
+    id: id,
+    title: CASE id % 10
+      WHEN 1 THEN 'Новые тренды в нейросетях 2026'
+      WHEN 2 THEN 'Блокчейн в финансах'
+      WHEN 3 THEN 'Стартапы будущего'
+      WHEN 4 THEN 'Научные исследования 2026'
+      WHEN 5 THEN 'Python для начинающих'
+      WHEN 6 THEN 'Big Data инструменты'
+      WHEN 7 THEN 'Cloud технологии'
+      WHEN 8 THEN 'DevOps практики'
+      WHEN 9 THEN 'Кибербезопасность сегодня'
+      ELSE 'Искусственный интеллект'
+    END + ' #' + id,
+    content: 'Содержание свежей статьи...',
+    created_at: datetime() - duration({days: id % 7}), // Разные даты за последние 7 дней
+    views: toInteger(rand() * 5000) + 1000,
+    likes: toInteger(rand() * 500) + 50,
+    comments_count: toInteger(rand() * 50) + 5,
+    is_published: true,
+    reading_time_min: 5 + id % 10
+  })
+);
+
+// Добавляем теги к новым статьям
+MATCH (art:Article) WHERE art.id >= 21
+WITH art, art.id % 8 + 1 AS tagId
+MATCH (t:Tag {id: tagId})
+MERGE (art)-[:TAGGED_WITH {weight: rand()}]->(t);
+
+// Добавляем категории к новым статьям
+MATCH (art:Article) WHERE art.id >= 21
+WITH art, art.id % 6 + 1 AS catId
+MATCH (c:Category {id: catId})
+MERGE (art)-[:IN_CATEGORY {relevance: rand() * 100}]->(c);
+
+// Добавляем источники
+MATCH (art:Article) WHERE art.id >= 21
+WITH art, art.id % 4 + 1 AS sourceId
+MATCH (s:Source {id: sourceId})
+MERGE (art)-[:FROM_SOURCE {published_at: art.created_at}]->(s);
+
+// Проверим созданные статьи
+MATCH (a:Article) 
+WHERE a.created_at >= datetime() - duration({days: 7})
+RETURN a.id, a.title, a.created_at 
+ORDER BY a.created_at DESC
+
+
+
+
+
+// Топ-20 рекомендаций новостей для пользователя с id = 1
+MATCH (target:User {id: 1})
+
+// 1. Собираем все положительные взаимодействия пользователя
+OPTIONAL MATCH (target)-[:LIKED]->(likedArticles:Article)
+OPTIONAL MATCH (target)-[:FAVORITED]->(favoritedArticles:Article)
+OPTIONAL MATCH (target)-[:COMMENTED]->(commentedArticles:Article)
+WITH target, 
+     collect(DISTINCT likedArticles) + 
+     collect(DISTINCT favoritedArticles) + 
+     collect(DISTINCT commentedArticles) AS positiveArticles
+
+// 2. Получаем теги, которые нравятся пользователю
+OPTIONAL MATCH (positive:Article)-[:TAGGED_WITH]->(preferredTag:Tag)
+WHERE positive IN positiveArticles
+WITH target, positiveArticles, collect(DISTINCT preferredTag) AS preferredTags
+
+// 3. Получаем категории, на которые подписан пользователь
+OPTIONAL MATCH (target)-[:SUBSCRIBED_TO]->(preferredCategory:Category)
+WITH target, positiveArticles, preferredTags, collect(DISTINCT preferredCategory) AS preferredCategories
+
+// 4. Получаем историю чтения пользователя
+OPTIONAL MATCH (target)-[:READ]->(readArticle:Article)
+WITH target, positiveArticles, preferredTags, preferredCategories, 
+     collect(DISTINCT readArticle) AS readHistory
+
+// 5. Находим похожих пользователей (РАСШИРЯЕМ поиск)
+OPTIONAL MATCH (target)-[:READ]->(common:Article)<-[:READ]-(similarUser:User)
+WHERE similarUser.id <> target.id
+  // Убираем ограничение по дате для common статьи, чтобы найти больше похожих пользователей
+WITH target, positiveArticles, preferredTags, preferredCategories, readHistory,
+     collect(DISTINCT similarUser) AS similarUsers
+
+// 6. Получаем статьи от похожих пользователей (коллаборативная фильтрация)
+OPTIONAL MATCH (similar:User)-[:READ]->(collabArticle:Article)
+WHERE similar IN similarUsers
+  AND collabArticle.is_published = true
+  AND collabArticle.created_at >= datetime() - duration({days: 7}) // только свежие
+  AND NOT collabArticle IN readHistory
+  AND NOT collabArticle IN positiveArticles
+WITH target, preferredTags, preferredCategories, 
+     collect(DISTINCT collabArticle) AS collaborativeArticles
+
+// 7. Основной сбор кандидатов - за последние 7 дней
+MATCH (candidate:Article)
+WHERE candidate.is_published = true
+  AND candidate.created_at >= datetime() - duration({days: 7})
+  AND NOT (target)-[:READ]->(candidate)
+  AND NOT (target)-[:LIKED]->(candidate)
+  AND NOT (target)-[:FAVORITED]->(candidate)
+
+// 8. Получаем теги и категории кандидата
+OPTIONAL MATCH (candidate)-[:TAGGED_WITH]->(tag:Tag)
+OPTIONAL MATCH (candidate)-[:IN_CATEGORY]->(category:Category)
+
+WITH candidate,
+     collect(DISTINCT tag) AS candidateTags,
+     collect(DISTINCT category) AS candidateCategories,
+     preferredTags, preferredCategories, collaborativeArticles
+
+// 9. ВЫЧИСЛЯЕМ СКОР
+WITH candidate,
+     // Условие 1: Любимые теги (+5)
+     REDUCE(score = 0, t IN preferredTags | 
+            CASE WHEN t IN candidateTags THEN score + 5 ELSE score END) AS tagScore,
+     
+     // Условие 2: Подписки на категории (+4)
+     REDUCE(score = 0, c IN preferredCategories | 
+            CASE WHEN c IN candidateCategories THEN score + 4 ELSE score END) AS categoryScore,
+     
+     // Условие 3: Коллаборативная фильтрация (+10)
+     CASE WHEN candidate IN collaborativeArticles THEN 10 ELSE 0 END AS collaborativeScore,
+     
+     // Популярность (бонус)
+     (coalesce(candidate.views, 0) / 2000.0) * 0.3 + 
+     (coalesce(candidate.likes, 0) / 200.0) * 0.5 AS popularityScore
+
+// 10. Финальный скор
+WITH candidate, 
+     (tagScore + categoryScore + collaborativeScore + popularityScore) AS finalScore,
+     tagScore, categoryScore, collaborativeScore, popularityScore
+
+WHERE finalScore > 0
+
+// 11. Возвращаем топ-20
+RETURN 
+    candidate.id AS article_id,
+    candidate.title AS title,
+    candidate.created_at AS published_date,
+    candidate.views AS views,
+    candidate.likes AS likes,
+    ROUND(finalScore, 2) AS total_score,
+    ROUND(tagScore, 2) AS liked_tags_score,
+    ROUND(categoryScore, 2) AS categories_score,
+    ROUND(collaborativeScore, 2) AS similar_users_score,
+    ROUND(popularityScore, 2) AS popularity_score,
+    // Показываем, сколько условий выполнилось
+    CASE 
+        WHEN tagScore > 0 AND collaborativeScore > 0 AND categoryScore > 0 
+            THEN '🔥 3 условия'
+        WHEN (tagScore > 0 AND collaborativeScore > 0) OR 
+             (tagScore > 0 AND categoryScore > 0) OR 
+             (collaborativeScore > 0 AND categoryScore > 0)
+            THEN '👍 2 условия'
+        WHEN tagScore > 0 OR collaborativeScore > 0 OR categoryScore > 0
+            THEN '👌 1 условие'
+        ELSE '📌 0 условий'
+    END AS conditions_met,
+    // Детализация
+    CASE 
+        WHEN tagScore > 0 AND collaborativeScore > 0 AND categoryScore > 0 
+            THEN '✅ Теги + Категории + Похожие'
+        WHEN tagScore > 0 AND collaborativeScore > 0 
+            THEN '✅ Теги + Похожие'
+        WHEN tagScore > 0 AND categoryScore > 0 
+            THEN '✅ Теги + Категории'
+        WHEN collaborativeScore > 0 AND categoryScore > 0 
+            THEN '✅ Категории + Похожие'
+        WHEN tagScore > 0 
+            THEN '✅ Только теги'
+        WHEN collaborativeScore > 0 
+            THEN '✅ Только похожие'
+        WHEN categoryScore > 0 
+            THEN '✅ Только категории'
+        ELSE '❌ Нет совпадений'
+    END AS matching_conditions
+ORDER BY finalScore DESC
+LIMIT 20
