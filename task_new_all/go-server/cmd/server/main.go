@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -24,6 +25,10 @@ func main() {
 	log.Printf("Config: Neo4j=%s, Kafka=%v, ClickHouse=%s:%s",
 		cfg.Neo4jURI, cfg.KafkaBrokers, cfg.ClickHouseHost, cfg.ClickHousePort)
 
+	// Создаем контекст с отменой для graceful shutdown
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	// Инициализация Neo4j
 	neo4jClient, err := database.NewNeo4jClient(
 		cfg.Neo4jURI,
@@ -37,24 +42,27 @@ func main() {
 	defer neo4jClient.Close()
 
 	// Создание ограничений и индексов
-	ctx := context.Background()
 	if err := neo4jClient.SetupConstraints(ctx); err != nil {
 		log.Printf("Warning: failed to setup constraints: %v", err)
 	}
 
-	// Инициализация ClickHouse
-	clickhouseClient, err := database.NewClickHouseClient(
-		cfg.ClickHouseHost,
-		cfg.ClickHousePort,
-		cfg.ClickHouseUser,
-		cfg.ClickHousePassword,
-		cfg.ClickHouseDB,
-	)
-	if err != nil {
-		log.Printf("Warning: failed to connect to ClickHouse: %v", err)
-	}
-	if clickhouseClient != nil {
-		defer clickhouseClient.Close()
+	// Инициализация ClickHouse (опционально)
+	var clickhouseClient *database.ClickHouseClient
+	if cfg.EnableKafkaConsumerClickHouse {
+		clickhouseClient, err = database.NewClickHouseClient(
+			cfg.ClickHouseHost,
+			cfg.ClickHousePort,
+			cfg.ClickHouseUser,
+			cfg.ClickHousePassword,
+			cfg.ClickHouseDB,
+		)
+		if err != nil {
+			log.Printf("Warning: failed to connect to ClickHouse: %v", err)
+			log.Println("ClickHouse features will be disabled")
+			clickhouseClient = nil
+		} else {
+			defer clickhouseClient.Close()
+		}
 	}
 
 	// Инициализация Kafka Producer
@@ -63,6 +71,9 @@ func main() {
 		kafkaProducer = kafka.NewProducer(cfg.KafkaBrokers, cfg.KafkaTopicEvents)
 		defer kafkaProducer.Close()
 	}
+
+	// Канал для ошибок consumer'ов
+	consumerErrors := make(chan error, 2)
 
 	// Инициализация Kafka Consumer для Neo4j
 	if cfg.EnableKafkaConsumerNeo4j {
@@ -76,9 +87,11 @@ func main() {
 		)
 		defer neo4jConsumer.Close()
 
-		// Запуск consumer в горутине
+		// Запуск consumer в горутине с обработкой ошибок
 		go func() {
-			neo4jConsumer.Start(context.Background())
+			log.Println("Starting Neo4j Kafka consumer...")
+			neo4jConsumer.Start(ctx)
+			consumerErrors <- nil
 		}()
 	}
 
@@ -95,7 +108,9 @@ func main() {
 		defer clickhouseConsumer.Close()
 
 		go func() {
-			clickhouseConsumer.Start(context.Background())
+			log.Println("Starting ClickHouse Kafka consumer...")
+			clickhouseConsumer.Start(ctx)
+			consumerErrors <- nil
 		}()
 	}
 
@@ -136,7 +151,7 @@ func main() {
 		neo4jAPI.GET("/stats", h.GetGraphStats)
 	}
 
-	// ClickHouse API (Задание 3)
+	// ClickHouse API (Задание 3) - только если клиент инициализирован
 	if clickhouseClient != nil {
 		chAPI := router.Group("/api/clickhouse")
 		{
@@ -146,13 +161,21 @@ func main() {
 			chAPI.GET("/author-stats", h.GetAuthorStats)
 			chAPI.GET("/retention", h.GetUserRetention)
 			chAPI.GET("/engagement", h.GetEngagementByHour)
+			chAPI.GET("/likes-by-category", h.GetLikesByCategory)
+			chAPI.GET("/top-readers", h.GetTopReaders)
 		}
 	}
 
-	// Запуск сервера
+	// HTTP сервер
+	srv := &http.Server{
+		Addr:    ":" + cfg.HTTPPort,
+		Handler: router,
+	}
+
+	// Запуск HTTP сервера в горутине
 	go func() {
 		log.Printf("HTTP server listening on :%s", cfg.HTTPPort)
-		if err := router.Run(":" + cfg.HTTPPort); err != nil {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("Failed to start server: %v", err)
 		}
 	}()
@@ -160,13 +183,29 @@ func main() {
 	// Graceful shutdown
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
+
+	// Ожидание сигнала или ошибки consumer'а
+	select {
+	case <-quit:
+		log.Println("Received shutdown signal...")
+	case err := <-consumerErrors:
+		if err != nil {
+			log.Printf("Consumer error: %v", err)
+		}
+	}
 
 	log.Println("Shutting down server...")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
+	// Отменяем контекст для остановки consumer'ов
+	cancel()
 
-	<-ctx.Done()
+	// Таймаут для shutdown HTTP сервера
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer shutdownCancel()
+
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		log.Printf("HTTP server shutdown error: %v", err)
+	}
+
 	log.Println("Server exited")
 }

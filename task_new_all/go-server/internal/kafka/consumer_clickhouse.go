@@ -48,12 +48,20 @@ func (c *ClickHouseConsumer) Start(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			log.Println("Stopping ClickHouse Kafka consumer...")
+			log.Println("Stopping clickhouse Kafka consumer...")
 			return
 		default:
-			msg, err := c.Reader.FetchMessage(ctx)
+			// Установите таймаут для FetchMessage
+			fetchCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			msg, err := c.Reader.FetchMessage(fetchCtx)
+			cancel()
+
 			if err != nil {
+				if err == context.DeadlineExceeded {
+					continue
+				}
 				log.Printf("Error fetching message: %v", err)
+				time.Sleep(time.Second) // Избегаем busy loop
 				continue
 			}
 

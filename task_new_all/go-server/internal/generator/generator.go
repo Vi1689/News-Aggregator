@@ -17,6 +17,7 @@ type Generator struct {
 	authors    []AuthorInfo
 	users      []string
 	newsTitles []string
+	rng        *rand.Rand // Добавляем собственный генератор
 }
 
 type AuthorInfo struct {
@@ -25,6 +26,9 @@ type AuthorInfo struct {
 }
 
 func NewGenerator() *Generator {
+	// Создаем генератор с уникальным seed'ом
+	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+
 	return &Generator{
 		categories: []string{
 			"Technology", "Politics", "Sports", "Business", "Science",
@@ -61,31 +65,30 @@ func NewGenerator() *Generator {
 			"Football championship goes to overtime",
 			"Revolutionary cancer treatment approved",
 		},
+		rng: rng,
 	}
 }
 
 // Генерация новости
 func (g *Generator) GenerateNews(index int) models.NewsPublishedEvent {
-	rand.Seed(time.Now().UnixNano() + int64(index))
-
-	author := g.authors[rand.Intn(len(g.authors))]
+	author := g.authors[g.rng.Intn(len(g.authors))]
 
 	// Выбираем случайные категории (1-3)
-	numCategories := rand.Intn(3) + 1
+	numCategories := g.rng.Intn(3) + 1
 	categories := make([]string, numCategories)
 	for i := 0; i < numCategories; i++ {
-		categories[i] = g.categories[rand.Intn(len(g.categories))]
+		categories[i] = g.categories[g.rng.Intn(len(g.categories))]
 	}
 
 	// Выбираем случайные теги (2-5)
-	numTags := rand.Intn(4) + 2
+	numTags := g.rng.Intn(4) + 2
 	tags := make([]string, numTags)
 	for i := 0; i < numTags; i++ {
-		tags[i] = g.tags[rand.Intn(len(g.tags))]
+		tags[i] = g.tags[g.rng.Intn(len(g.tags))]
 	}
 
 	// Генерируем дату (последние 30 дней)
-	publishedAt := time.Now().Add(-time.Duration(rand.Intn(30*24)) * time.Hour)
+	publishedAt := time.Now().Add(-time.Duration(g.rng.Intn(30*24)) * time.Hour)
 
 	event := models.NewsPublishedEvent{
 		BaseEvent: models.BaseEvent{
@@ -99,7 +102,7 @@ func (g *Generator) GenerateNews(index int) models.NewsPublishedEvent {
 	}
 
 	event.Payload.NewsID = fmt.Sprintf("news_%d", index)
-	event.Payload.Title = fmt.Sprintf("%s #%d", g.newsTitles[rand.Intn(len(g.newsTitles))], index)
+	event.Payload.Title = fmt.Sprintf("%s #%d", g.newsTitles[g.rng.Intn(len(g.newsTitles))], index)
 	event.Payload.Summary = "This is a summary of the news article. It contains key information about the event."
 	event.Payload.FullText = "Full text of the news article. Lorem ipsum dolor sit amet, consectetur adipiscing elit. " +
 		"Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam."
@@ -116,7 +119,9 @@ func (g *Generator) GenerateNews(index int) models.NewsPublishedEvent {
 
 // Генерация просмотра новости
 func (g *Generator) GenerateNewsView(newsID string, userID string, timestamp time.Time) models.NewsViewedEvent {
-	rand.Seed(time.Now().UnixNano())
+	// Выбираем случайное устройство
+	devices := []string{"mobile", "desktop", "tablet"}
+	deviceType := devices[g.rng.Intn(len(devices))]
 
 	return models.NewsViewedEvent{
 		BaseEvent: models.BaseEvent{
@@ -137,9 +142,9 @@ func (g *Generator) GenerateNewsView(newsID string, userID string, timestamp tim
 		}{
 			NewsID:          newsID,
 			UserID:          userID,
-			ReadDurationSec: rand.Intn(300) + 10, // 10-310 секунд
-			ScrollDepth:     float64(rand.Intn(100)) / 100.0,
-			DeviceType:      []string{"mobile", "desktop", "tablet"}[rand.Intn(3)],
+			ReadDurationSec: g.rng.Intn(300) + 10, // 10-310 секунд
+			ScrollDepth:     float64(g.rng.Intn(100)) / 100.0,
+			DeviceType:      deviceType,
 			SessionID:       uuid.New().String(),
 		},
 	}
@@ -147,11 +152,9 @@ func (g *Generator) GenerateNewsView(newsID string, userID string, timestamp tim
 
 // Генерация лайка
 func (g *Generator) GenerateNewsLike(newsID string, userID string, timestamp time.Time) models.NewsLikedEvent {
-	rand.Seed(time.Now().UnixNano())
-
 	// 90% лайков, 10% дизлайков
 	likeValue := 1
-	if rand.Intn(100) < 10 {
+	if g.rng.Intn(100) < 10 {
 		likeValue = -1
 	}
 
@@ -178,8 +181,6 @@ func (g *Generator) GenerateNewsLike(newsID string, userID string, timestamp tim
 
 // Генерация шера
 func (g *Generator) GenerateNewsShare(newsID string, fromUserID, toUserID string, timestamp time.Time) models.NewsSharedEvent {
-	rand.Seed(time.Now().UnixNano())
-
 	platforms := []string{"telegram", "twitter", "facebook", "whatsapp"}
 
 	return models.NewsSharedEvent{
@@ -199,7 +200,7 @@ func (g *Generator) GenerateNewsShare(newsID string, fromUserID, toUserID string
 		}{
 			NewsID:         newsID,
 			UserID:         fromUserID,
-			Platform:       platforms[rand.Intn(len(platforms))],
+			Platform:       platforms[g.rng.Intn(len(platforms))],
 			SharedToUserID: toUserID,
 		},
 	}
@@ -217,21 +218,19 @@ func (g *Generator) GenerateFullDataset(newsCount, eventsCount int) ([]models.Ne
 	}
 
 	// Генерируем события взаимодействия
-	rand.Seed(time.Now().UnixNano())
-
 	for i := 0; i < eventsCount-newsCount; i++ {
-		newsIndex := rand.Intn(newsCount)
+		newsIndex := g.rng.Intn(newsCount)
 		newsID := fmt.Sprintf("news_%d", newsIndex)
-		userID := g.users[rand.Intn(len(g.users))]
-		timestamp := time.Now().Add(-time.Duration(rand.Intn(7*24)) * time.Hour)
+		userID := g.users[g.rng.Intn(len(g.users))]
+		timestamp := time.Now().Add(-time.Duration(g.rng.Intn(7*24)) * time.Hour)
 
-		eventType := rand.Intn(100)
+		eventType := g.rng.Intn(100)
 		if eventType < 60 { // 60% просмотров
 			allEvents = append(allEvents, g.GenerateNewsView(newsID, userID, timestamp))
 		} else if eventType < 85 { // 25% лайков
 			allEvents = append(allEvents, g.GenerateNewsLike(newsID, userID, timestamp))
 		} else { // 15% шеров
-			toUserID := g.users[rand.Intn(len(g.users))]
+			toUserID := g.users[g.rng.Intn(len(g.users))]
 			allEvents = append(allEvents, g.GenerateNewsShare(newsID, userID, toUserID, timestamp))
 		}
 	}

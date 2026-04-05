@@ -227,6 +227,13 @@ services:
         condition: service_started
       clickhouse:
         condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    # Ждем 30 секунд после запуска зависимостей
+    command: ["sh", "-c", "sleep 30 && ./news-server"]
     environment:
       # Neo4j
       NEO4J_URI: bolt://neo4j:7687
@@ -244,7 +251,7 @@ services:
       
       # ClickHouse
       CLICKHOUSE_HOST: clickhouse
-      CLICKHOUSE_PORT: 8123
+      CLICKHOUSE_PORT: 9000
       CLICKHOUSE_USER: analyst
       CLICKHOUSE_PASSWORD: analyst123
       CLICKHOUSE_DB: newsdb
