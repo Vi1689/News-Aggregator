@@ -120,6 +120,13 @@ func (c *Neo4jConsumer) processMessage(ctx context.Context, msg kafka.Message) e
 			return err
 		}
 		return c.handleNewsShared(ctx, event)
+
+	case "NewsMentions":
+		var event models.NewsMentionsEvent
+		if err := json.Unmarshal(msg.Value, &event); err != nil {
+			return err
+		}
+		return c.handleNewsMentions(ctx, event)
 	}
 
 	return nil
@@ -256,4 +263,38 @@ func (c *Neo4jConsumer) sendToDLQ(ctx context.Context, msg kafka.Message, err er
 	if sendErr := c.DLQProducer.Writer.WriteMessages(ctx, dlqKafkaMsg); sendErr != nil {
 		log.Printf("Failed to send to DLQ: %v", sendErr)
 	}
+}
+
+func (c *Neo4jConsumer) handleNewsMentions(ctx context.Context, event models.NewsMentionsEvent) error {
+	session := c.Neo4jClient.Driver.NewSession(ctx, neo4j.SessionConfig{
+		DatabaseName: c.Neo4jClient.Database,
+	})
+	defer session.Close(ctx)
+
+	query := `
+		MATCH (from:News {id: $from_id})
+		MATCH (to:News {id: $to_id})
+		MERGE (from)-[:MENTIONS {
+			strength: $strength,
+			context: $context,
+			timestamp: $timestamp
+		}]->(to)
+	`
+
+	_, err := session.Run(ctx, query, map[string]interface{}{
+		"from_id":   event.Payload.FromNewsID,
+		"to_id":     event.Payload.ToNewsID,
+		"strength":  event.Payload.Strength,
+		"context":   event.Payload.Context,
+		"timestamp": event.Timestamp,
+	})
+
+	if err != nil {
+		log.Printf("Failed to create MENTIONS relation: %v", err)
+		return err
+	}
+
+	log.Printf("Created MENTIONS relation: %s -> %s (strength=%d)",
+		event.Payload.FromNewsID, event.Payload.ToNewsID, event.Payload.Strength)
+	return nil
 }

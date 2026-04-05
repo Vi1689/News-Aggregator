@@ -36,6 +36,19 @@ type User struct {
 	RegisteredAt time.Time `json:"registered_at"`
 }
 
+// Событие цитирования
+type NewsMentionsEvent struct {
+	BaseEvent
+	Payload MentionsPayload `json:"payload"`
+}
+
+type MentionsPayload struct {
+	FromNewsID string `json:"fromNewsId"`
+	ToNewsID   string `json:"toNewsId"`
+	Strength   int    `json:"strength"`
+	Context    string `json:"context"`
+}
+
 // ============================================
 // KAFKA СОБЫТИЯ
 // ============================================

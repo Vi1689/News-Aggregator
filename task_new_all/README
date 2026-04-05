@@ -412,7 +412,7 @@ Retention: 30 дней
 # Переменные окружения
 export NEO4J_URI=bolt://localhost:7687
 export NEO4J_USER=neo4j
-export NEO4J_PASSWORD=StrongPwd123
+export NEO4J_PASSWORD=12345678
 export KAFKA_BROKERS=localhost:9092
 export CLICKHOUSE_HOST=localhost:8123
 export HTTP_PORT=8080

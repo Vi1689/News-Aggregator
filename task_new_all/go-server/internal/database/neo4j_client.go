@@ -299,21 +299,20 @@ func (c *Neo4jClient) GetCitationChain(ctx context.Context, startNewsID string, 
 	})
 	defer session.Close(ctx)
 
-	query := `
-        MATCH path = (start:News {id: $start_id})-[:MENTIONS*$min_hops..$max_hops]->(end:News)
-        RETURN end.id AS end_news_id,
-               end.title AS end_title,
-               length(path) AS chain_length,
-               [rel IN relationships(path) | rel.strength] AS strengths,
-               [node IN nodes(path) | node.id] AS path_nodes
-        ORDER BY chain_length ASC
-        LIMIT 10
-    `
+	// Исправление: подставляем значения через fmt.Sprintf
+	query := fmt.Sprintf(`
+		MATCH path = (start:News {id: $start_id})-[:MENTIONS*%d..%d]->(end:News)
+		RETURN end.id AS end_news_id,
+			   end.title AS end_title,
+			   length(path) AS chain_length,
+			   [rel IN relationships(path) | rel.strength] AS strengths,
+			   [node IN nodes(path) | node.id] AS path_nodes
+		ORDER BY chain_length ASC
+		LIMIT 10
+	`, minHops, maxHops)
 
 	result, err := session.Run(ctx, query, map[string]interface{}{
 		"start_id": startNewsID,
-		"min_hops": minHops,
-		"max_hops": maxHops,
 	})
 	if err != nil {
 		return nil, err
@@ -458,36 +457,26 @@ func (c *Neo4jClient) GetComplexRecommendations(ctx context.Context, userID stri
 	defer session.Close(ctx)
 
 	query := `
-        // Найти новости, которые понравились пользователю
-        MATCH (u:User {id: $user_id})-[:LIKED]->(liked:News)
-        
-        // Найти новости, связанные через цепочку тегов (2-4 шага)
-        MATCH path = (liked)-[:TAGGED_WITH*2..4]->(t:Tag)<-[:TAGGED_WITH]-(rec:News)
-        WHERE rec.id <> liked.id
-        
-        // Фильтр по дате (только свежие)
-        AND rec.published_at >= datetime() - duration({days: 7})
-        
-        // Агрегация
-        WITH rec, 
-             count(DISTINCT liked) AS liked_sources_count,
-             collect(DISTINCT t.name) AS path_tags,
-             avg([rel IN relationships(path) | rel.weight]) AS avg_weight
-        
-        RETURN rec.id AS news_id,
-               rec.title AS title,
-               liked_sources_count,
-               path_tags,
-               avg_weight
-        ORDER BY liked_sources_count DESC, avg_weight DESC
-        LIMIT $limit
-    `
+		MATCH (u:User {id: $user_id})-[:LIKED]->(liked:News)
+		MATCH path = (liked)-[:TAGGED_WITH*2..4]->(t:Tag)<-[:TAGGED_WITH]-(rec:News)
+		WHERE rec.id <> liked.id
+		  AND rec.published_at >= datetime() - duration({days: 7})
+		WITH rec, 
+			 count(DISTINCT liked) AS liked_sources_count,
+			 collect(DISTINCT t.name) AS path_tags,
+			 reduce(s = 0.0, rel IN relationships(path) | s + COALESCE(rel.weight, 0)) / length(path) AS avg_weight
+		RETURN rec.id AS news_id,
+			   rec.title AS title,
+			   liked_sources_count,
+			   path_tags,
+			   avg_weight
+		ORDER BY liked_sources_count DESC, avg_weight DESC
+		LIMIT $limit
+	`
 
 	result, err := session.Run(ctx, query, map[string]interface{}{
-		"user_id":  userID,
-		"min_hops": minHops,
-		"max_hops": maxHops,
-		"limit":    limit,
+		"user_id": userID,
+		"limit":   limit,
 	})
 	if err != nil {
 		return nil, err
@@ -517,11 +506,11 @@ func (c *Neo4jClient) GetGraphStats(ctx context.Context) (map[string]interface{}
 
 	query := `
         MATCH (n:News) WITH count(n) AS news_count
-        MATCH (c:Category) WITH news_count, count(c) AS category_count
-        MATCH (a:Author) WITH news_count, category_count, count(a) AS author_count
-        MATCH (t:Tag) WITH news_count, category_count, author_count, count(t) AS tag_count
-        MATCH (u:User) WITH news_count, category_count, author_count, tag_count, count(u) AS user_count
-        MATCH ()-[r]->() WITH news_count, category_count, author_count, tag_count, user_count, count(r) AS rel_count
+        OPTIONAL MATCH (c:Category) WITH news_count, count(c) AS category_count
+        OPTIONAL MATCH (a:Author) WITH news_count, category_count, count(a) AS author_count
+        OPTIONAL MATCH (t:Tag) WITH news_count, category_count, author_count, count(t) AS tag_count
+        OPTIONAL MATCH (u:User) WITH news_count, category_count, author_count, tag_count, count(u) AS user_count
+        OPTIONAL MATCH ()-[r]->() WITH news_count, category_count, author_count, tag_count, user_count, count(r) AS rel_count
         RETURN news_count, category_count, author_count, tag_count, user_count, rel_count
     `
 
@@ -542,5 +531,8 @@ func (c *Neo4jClient) GetGraphStats(ctx context.Context) (map[string]interface{}
 		}, nil
 	}
 
-	return nil, nil
+	return map[string]interface{}{
+		"news_count": 0, "category_count": 0, "author_count": 0,
+		"tag_count": 0, "user_count": 0, "relations_count": 0,
+	}, nil
 }

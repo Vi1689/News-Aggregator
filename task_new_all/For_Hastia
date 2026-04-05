@@ -1,0 +1,88 @@
+TODO для Насти 
+
+Текущие проблемы:
+1. ClickHouse UI не запускается и шлёт нахуй 
+2. В ClickHouse нет таблиц
+3. Вывод в neo4j иногда будет null, так как генератор щас хуёво работает
+4. Возможно имеет смысл не генерить их в прямом смыле, а просто сделать файлик который будет подгружать готовые данные, но тогда они должны совпадать с другой бд. Мозгоебля короче не трогай генератор
+5. Проверить что метрики работаю правильно, по возможности куда-нибуть в текстовик написать что вставлять в прометеусе и графане
+
+
+
+Проверка что всё работает заебись:
+1. curl http://localhost:8080/health
+Вывод - {"service":"news-aggregator","status":"ok","timestamp":"2026-04-05T10:48:22.540192562Z"}
+
+
+
+2. Генерим данные 
+curl -X POST http://localhost:8080/api/generate \
+  -H "Content-Type: application/json" \
+  -d '{"nodes": 20, "events": 500, "clean_first": true}'
+
+
+
+3. Проверяем neo4j 
+# Статистика графа
+curl http://localhost:8080/api/neo4j/stats
+
+# Топ авторов
+curl "http://localhost:8080/api/neo4j/top-authors?limit=10"
+
+# Похожие новости
+curl "http://localhost:8080/api/neo4j/similar/news_1?limit=5"
+
+# Фильтр новостей
+curl "http://localhost:8080/api/neo4j/filter?language=en&category=Technology&days=7"
+
+# Цепочка цитирований
+curl "http://localhost:8080/api/neo4j/chain/news_1?min_hops=2&max_hops=4"
+
+# Общие соседи (авторы)
+curl "http://localhost:8080/api/neo4j/common-neighbors?author1=tech_crunch&author2=bbc_news"
+
+# Рекомендации для пользователя
+curl "http://localhost:8080/api/neo4j/recommend/user_001?limit=5"
+
+# Поиск по цепочке через читателей
+curl "http://localhost:8080/api/neo4j/reader-chain/user_001?max_depth=3"
+
+# Коллаборативные рекомендации
+curl "http://localhost:8080/api/neo4j/collaborative/user_001?limit=5"
+
+
+
+4. Проверяем ClickHouse 
+# Топ новостей по просмотрам
+curl "http://localhost:8080/api/clickhouse/top-news?days=7&limit=10"
+
+# Популярные теги
+curl "http://localhost:8080/api/clickhouse/popular-tags?hours=24&limit=20"
+
+# Активность пользователей по часам
+curl "http://localhost:8080/api/clickhouse/user-activity?date=$(date +%Y-%m-%d)"
+
+# Статистика по авторам
+curl "http://localhost:8080/api/clickhouse/author-stats?days=30"
+
+# Retention пользователей
+curl "http://localhost:8080/api/clickhouse/retention?days=30"
+
+# Анализ вовлечённости по времени суток
+curl "http://localhost:8080/api/clickhouse/engagement"
+
+# Лайки по категориям
+curl "http://localhost:8080/api/clickhouse/likes-by-category"
+
+# Топ читателей
+curl "http://localhost:8080/api/clickhouse/top-readers?limit=10"
+
+
+
+
+Сервис	        URL	                    Логин	Пароль
+Neo4j Browser	http://localhost:7474	neo4j	12345678
+Kafka UI	    http://localhost:8081	—       —
+ClickHouse UI	http://localhost:8082	analyst	12345678
+Grafana	        http://localhost:3000	admin	12345678
+Prometheus	    http://localhost:9090	—       —

@@ -46,23 +46,20 @@ func main() {
 		log.Printf("Warning: failed to setup constraints: %v", err)
 	}
 
-	// Инициализация ClickHouse (опционально)
-	var clickhouseClient *database.ClickHouseClient
-	if cfg.EnableKafkaConsumerClickHouse {
-		clickhouseClient, err = database.NewClickHouseClient(
-			cfg.ClickHouseHost,
-			cfg.ClickHousePort,
-			cfg.ClickHouseUser,
-			cfg.ClickHousePassword,
-			cfg.ClickHouseDB,
-		)
-		if err != nil {
-			log.Printf("Warning: failed to connect to ClickHouse: %v", err)
-			log.Println("ClickHouse features will be disabled")
-			clickhouseClient = nil
-		} else {
-			defer clickhouseClient.Close()
-		}
+	// Инициализация ClickHouse (всегда, не только при EnableKafkaConsumerClickHouse)
+	clickhouseClient, err := database.NewClickHouseClient(
+		cfg.ClickHouseHost,
+		cfg.ClickHousePort,
+		cfg.ClickHouseUser,
+		cfg.ClickHousePassword,
+		cfg.ClickHouseDB,
+	)
+	if err != nil {
+		log.Printf("Warning: failed to connect to ClickHouse: %v", err)
+		clickhouseClient = nil
+	} else {
+		defer clickhouseClient.Close()
+		log.Println("ClickHouse connected successfully")
 	}
 
 	// Инициализация Kafka Producer
@@ -72,49 +69,9 @@ func main() {
 		defer kafkaProducer.Close()
 	}
 
-	// Канал для ошибок consumer'ов
-	consumerErrors := make(chan error, 2)
-
-	// Инициализация Kafka Consumer для Neo4j
-	if cfg.EnableKafkaConsumerNeo4j {
-		dlqProducer := kafka.NewProducer(cfg.KafkaBrokers, cfg.KafkaTopicDLQ)
-		neo4jConsumer := kafka.NewNeo4jConsumer(
-			cfg.KafkaBrokers,
-			cfg.KafkaTopicEvents,
-			cfg.KafkaConsumerGroupNeo4j,
-			neo4jClient,
-			dlqProducer,
-		)
-		defer neo4jConsumer.Close()
-
-		// Запуск consumer в горутине с обработкой ошибок
-		go func() {
-			log.Println("Starting Neo4j Kafka consumer...")
-			neo4jConsumer.Start(ctx)
-			consumerErrors <- nil
-		}()
-	}
-
-	// Инициализация Kafka Consumer для ClickHouse
-	if cfg.EnableKafkaConsumerClickHouse && clickhouseClient != nil {
-		dlqProducerForCH := kafka.NewProducer(cfg.KafkaBrokers, cfg.KafkaTopicDLQ)
-		clickhouseConsumer := kafka.NewClickHouseConsumer(
-			cfg.KafkaBrokers,
-			cfg.KafkaTopicEvents,
-			cfg.KafkaConsumerGroupClickHouse,
-			clickhouseClient,
-			dlqProducerForCH,
-		)
-		defer clickhouseConsumer.Close()
-
-		go func() {
-			log.Println("Starting ClickHouse Kafka consumer...")
-			clickhouseConsumer.Start(ctx)
-			consumerErrors <- nil
-		}()
-	}
-
-	// Настройка HTTP сервера
+	// ============================================
+	// НАСТРОЙКА HTTP СЕРВЕРА (ДО CONSUMER'ОВ)
+	// ============================================
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.Default()
 
@@ -172,15 +129,66 @@ func main() {
 		Handler: router,
 	}
 
-	// Запуск HTTP сервера в горутине
+	// ЗАПУСК HTTP СЕРВЕРА ПЕРВЫМ
 	go func() {
 		log.Printf("HTTP server listening on :%s", cfg.HTTPPort)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Failed to start server: %v", err)
+			log.Printf("HTTP server error: %v", err)
 		}
 	}()
 
-	// Graceful shutdown
+	// Даем HTTP серверу время запуститься
+	time.Sleep(100 * time.Millisecond)
+
+	// ============================================
+	// ЗАПУСК CONSUMER'ОВ (НЕ БЛОКИРУЮТ HTTP)
+	// ============================================
+
+	// Канал для ошибок consumer'ов
+	consumerErrors := make(chan error, 2)
+
+	// Инициализация Kafka Consumer для Neo4j
+	if cfg.EnableKafkaConsumerNeo4j {
+		dlqProducer := kafka.NewProducer(cfg.KafkaBrokers, cfg.KafkaTopicDLQ)
+		neo4jConsumer := kafka.NewNeo4jConsumer(
+			cfg.KafkaBrokers,
+			cfg.KafkaTopicEvents,
+			cfg.KafkaConsumerGroupNeo4j,
+			neo4jClient,
+			dlqProducer,
+		)
+		defer neo4jConsumer.Close()
+
+		// Запуск consumer в горутине
+		go func() {
+			log.Println("Starting Neo4j Kafka consumer...")
+			neo4jConsumer.Start(ctx)
+			consumerErrors <- nil
+		}()
+	}
+
+	// Инициализация Kafka Consumer для ClickHouse
+	if cfg.EnableKafkaConsumerClickHouse && clickhouseClient != nil {
+		dlqProducerForCH := kafka.NewProducer(cfg.KafkaBrokers, cfg.KafkaTopicDLQ)
+		clickhouseConsumer := kafka.NewClickHouseConsumer(
+			cfg.KafkaBrokers,
+			cfg.KafkaTopicEvents,
+			cfg.KafkaConsumerGroupClickHouse,
+			clickhouseClient,
+			dlqProducerForCH,
+		)
+		defer clickhouseConsumer.Close()
+
+		go func() {
+			log.Println("Starting ClickHouse Kafka consumer...")
+			clickhouseConsumer.Start(ctx)
+			consumerErrors <- nil
+		}()
+	}
+
+	// ============================================
+	// GRACEFUL SHUTDOWN
+	// ============================================
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 

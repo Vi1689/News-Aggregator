@@ -59,11 +59,11 @@ func Load() *Config {
 		// Neo4j
 		Neo4jURI:      getEnv("NEO4J_URI", "bolt://localhost:7687"),
 		Neo4jUser:     getEnv("NEO4J_USER", "neo4j"),
-		Neo4jPassword: getEnv("NEO4J_PASSWORD", "StrongPwd123"),
+		Neo4jPassword: getEnv("NEO4J_PASSWORD", "12345678"),
 		Neo4jDatabase: getEnv("NEO4J_DATABASE", "newsgraph"),
 
 		// Kafka
-		KafkaBrokers:                 []string{getEnv("KAFKA_BROKERS", "localhost:9092")},
+		KafkaBrokers:                 []string{getEnv("KAFKA_BROKERS", "localhost:9093")},
 		KafkaTopicEvents:             getEnv("KAFKA_TOPIC_EVENTS", "news.events"),
 		KafkaTopicAnalytics:          getEnv("KAFKA_TOPIC_ANALYTICS", "news.analytics"),
 		KafkaTopicDLQ:                getEnv("KAFKA_TOPIC_DLQ", "news.dlq"),
@@ -72,9 +72,9 @@ func Load() *Config {
 
 		// ClickHouse
 		ClickHouseHost:     getEnv("CLICKHOUSE_HOST", "localhost"),
-		ClickHousePort:     getEnv("CLICKHOUSE_PORT", "8123"),
+		ClickHousePort:     getEnv("CLICKHOUSE_PORT", "9000"),
 		ClickHouseUser:     getEnv("CLICKHOUSE_USER", "analyst"),
-		ClickHousePassword: getEnv("CLICKHOUSE_PASSWORD", "analyst123"),
+		ClickHousePassword: getEnv("CLICKHOUSE_PASSWORD", "12345678"),
 		ClickHouseDB:       getEnv("CLICKHOUSE_DB", "newsdb"),
 
 		// Генерация
