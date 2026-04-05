@@ -142,17 +142,16 @@ services:
   # 6. CLICKHOUSE UI (для визуализации)
   # ============================================
   clickhouse-ui:
-    image: simplemail/clickhouse-web:latest
+    image: ghcr.io/caioricciuti/ch-ui:latest
     container_name: news-clickhouse-ui
     depends_on:
       - clickhouse
     environment:
-      - CLICKHOUSE_HOST=clickhouse
-      - CLICKHOUSE_PORT=8123
-      - CLICKHOUSE_USER=analyst
-      - CLICKHOUSE_PASSWORD=analyst123
+      VITE_CLICKHOUSE_URL: "http://clickhouse:8123"
+      VITE_CLICKHOUSE_USER: "analyst"
+      VITE_CLICKHOUSE_PASS: "analyst123"
     ports:
-      - "8082:8080"
+      - "8082:5521"
     networks:
       - news-network
     restart: unless-stopped
@@ -292,6 +291,7 @@ services:
   prometheus:
     image: prom/prometheus:latest
     container_name: news-prometheus
+    user: "0:0"
     ports:
       - "9090:9090"
     volumes:
@@ -310,6 +310,7 @@ services:
   grafana:
     image: grafana/grafana:latest
     container_name: news-grafana
+    user: "0:0"
     depends_on:
       - prometheus
     environment:

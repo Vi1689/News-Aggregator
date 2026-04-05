@@ -1,0 +1,39 @@
+# prometheus/prometheus.yml
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # Neo4j metrics (через экспортер)
+  - job_name: 'neo4j'
+    static_configs:
+      - targets: ['neo4j:2004']
+    metrics_path: '/metrics'
+  
+  # Kafka metrics (через JMX экспортер)
+  - job_name: 'kafka'
+    static_configs:
+      - targets: ['kafka:9092']
+  
+  # Go сервер метрики
+  - job_name: 'go-server'
+    static_configs:
+      - targets: ['go-server:8080']
+    metrics_path: '/metrics'
+  
+  # ClickHouse metrics
+  - job_name: 'clickhouse'
+    static_configs:
+      - targets: ['clickhouse:8123']
+    metrics_path: '/metrics'
+  
+  # Kafka Streams
+  - job_name: 'kafka-streams'
+    static_configs:
+      - targets: ['kafka-streams:8080']
+    metrics_path: '/metrics'
+  
+  # Prometheus self
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']

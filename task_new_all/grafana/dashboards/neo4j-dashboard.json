@@ -1,0 +1,42 @@
+{
+  "title": "News Aggregator Dashboard",
+  "uid": "news-dashboard",
+  "panels": [
+    {
+      "title": "Neo4j - Количество узлов",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "neo4j_node_count{type=\"News\"}"
+        }
+      ]
+    },
+    {
+      "title": "Kafka - Сообщений в секунду",
+      "type": "graph",
+      "targets": [
+        {
+          "expr": "rate(kafka_messages_in_total[1m])"
+        }
+      ]
+    },
+    {
+      "title": "ClickHouse - Запросов в секунду",
+      "type": "graph",
+      "targets": [
+        {
+          "expr": "clickhouse_queries_per_second"
+        }
+      ]
+    },
+    {
+      "title": "Go Server - HTTP запросы",
+      "type": "graph",
+      "targets": [
+        {
+          "expr": "rate(http_requests_total[1m])"
+        }
+      ]
+    }
+  ]
+}

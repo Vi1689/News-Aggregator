@@ -9,6 +9,7 @@ import (
 	"news-aggregator/internal/database"
 	"news-aggregator/internal/models"
 
+	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 	"github.com/segmentio/kafka-go"
 )
 
@@ -185,8 +186,8 @@ func (c *Neo4jConsumer) handleNewsLiked(ctx context.Context, event models.NewsLi
 func (c *Neo4jConsumer) handleNewsShared(ctx context.Context, event models.NewsSharedEvent) error {
 	// Создаём связи между пользователями (шер)
 	// Сначала убеждаемся что оба пользователя существуют
-	fromUser := &models.User{ID: event.Payload.UserID, Name: "user_" + event.Payload.UserID, RegisteredAt: time.Now()}
-	toUser := &models.User{ID: event.Payload.SharedToUserID, Name: "user_" + event.Payload.SharedToUserID, RegisteredAt: time.Now()}
+	// fromUser := &models.User{ID: event.Payload.UserID, Name: "user_" + event.Payload.UserID, RegisteredAt: time.Now()}
+	// toUser := &models.User{ID: event.Payload.SharedToUserID, Name: "user_" + event.Payload.SharedToUserID, RegisteredAt: time.Now()}
 
 	// Создаём связь SHARED_TO
 	session := c.Neo4jClient.Driver.NewSession(ctx, neo4j.SessionConfig{DatabaseName: c.Neo4jClient.Database})

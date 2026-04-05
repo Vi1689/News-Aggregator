@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS news_events_raw
     eventId String,
     eventType String,
     entityId String,
-    timestamp DateTime64(3),
+    timestamp DateTime,   
     source String,
     version UInt8,
     ingestionTime DateTime DEFAULT now(),
@@ -27,7 +27,7 @@ CREATE TABLE IF NOT EXISTS news_events_raw
     authorType String,
     categories Array(String),
     tags Array(String),
-    published_at DateTime64(3),
+    published_at DateTime,   
     
     -- Данные пользователя
     userId String,
@@ -41,9 +41,9 @@ CREATE TABLE IF NOT EXISTS news_events_raw
     parentCommentId String
 )
 ENGINE = MergeTree()
-PARTITION BY toYYYYMM(timestamp)  -- Месячные партиции
-ORDER BY (eventType, timestamp, newsId)  -- Для быстрой фильтрации по типу и дате
-TTL timestamp + INTERVAL 90 DAY  -- Храним 3 месяца
+PARTITION BY toYYYYMM(timestamp)
+ORDER BY (eventType, timestamp, newsId)
+TTL timestamp + INTERVAL 90 DAY
 SETTINGS index_granularity = 8192;
 
 -- ============================================
@@ -88,19 +88,10 @@ CREATE TABLE IF NOT EXISTS news_events_dedup
 (
     eventId String,
     eventType String,
-    timestamp DateTime64(3),
+    timestamp DateTime,
     payload String,
     version UInt8,
     _is_deleted UInt8 DEFAULT 0
 )
 ENGINE = ReplacingMergeTree(version)
 ORDER BY (eventId, timestamp);
-
--- ============================================
--- ПРИМЕР ЗАПРОСА К ВИДРИНЕ
--- ============================================
--- Топ-10 новостей за неделю:
--- SELECT newsId, title, views, likes 
--- FROM news_daily_stats 
--- WHERE date >= today() - 7 
--- ORDER BY views DESC LIMIT 10;

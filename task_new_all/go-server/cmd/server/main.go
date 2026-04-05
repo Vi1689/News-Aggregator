@@ -150,7 +150,6 @@ func main() {
 	}
 
 	// Запуск сервера
-	srv := &gin.Engine{}
 	go func() {
 		log.Printf("HTTP server listening on :%s", cfg.HTTPPort)
 		if err := router.Run(":" + cfg.HTTPPort); err != nil {
