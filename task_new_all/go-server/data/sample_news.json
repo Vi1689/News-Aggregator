@@ -1,0 +1,28 @@
+[
+  {
+    "id": "news_001",
+    "title": "Quantum Computing Breakthrough Announced",
+    "summary": "Scientists achieve quantum supremacy with new processor",
+    "full_text": "A team of researchers has demonstrated quantum supremacy using a novel 100-qubit processor...",
+    "author": "tech_crunch",
+    "author_type": "agency",
+    "categories": ["Technology", "Science"],
+    "tags": ["quantum", "ai", "breakthrough"],
+    "published_at": "2026-02-10T09:00:00Z",
+    "source_url": "https://techcrunch.com/quantum-breakthrough",
+    "language": "en"
+  },
+  {
+    "id": "news_002",
+    "title": "Global Climate Summit Reaches Historic Deal",
+    "summary": "195 countries agree to reduce emissions by 50% by 2030",
+    "full_text": "In a landmark decision, world leaders have committed to unprecedented climate action...",
+    "author": "bbc_news",
+    "author_type": "agency",
+    "categories": ["Environment", "Politics"],
+    "tags": ["climate", "politics", "sustainability"],
+    "published_at": "2026-02-09T14:30:00Z",
+    "source_url": "https://bbc.com/climate-summit",
+    "language": "en"
+  }
+]

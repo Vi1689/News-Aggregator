@@ -1,0 +1,325 @@
+networks:
+  news-network:
+    driver: bridge
+
+volumes:
+  neo4j-data:
+  neo4j-logs:
+  neo4j-import:
+  clickhouse-data:
+  kafka-data:
+  zookeeper-data:
+  postgres-data:  # для Kafka Connect (хранит конфиги)
+
+services:
+  # ============================================
+  # 1. ZOOKEEPER (для Kafka)
+  # ============================================
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: news-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+    volumes:
+      - zookeeper-data:/var/lib/zookeeper/data
+      - zookeeper-data:/var/lib/zookeeper/log
+    networks:
+      - news-network
+    restart: unless-stopped
+
+  # ============================================
+  # 2. KAFKA
+  # ============================================
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: news-kafka
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,INTERNAL://kafka:9093
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,INTERNAL://0.0.0.0:9093
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,INTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_DELETE_TOPIC_ENABLE: "true"
+    ports:
+      - "9092:9092"  # внешний доступ
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    networks:
+      - news-network
+    restart: unless-stopped
+
+  # ============================================
+  # 3. KAFKA UI (для мониторинга)
+  # ============================================
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: news-kafka-ui
+    depends_on:
+      - kafka
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9093
+      KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper:2181
+    ports:
+      - "8081:8080"
+    networks:
+      - news-network
+    restart: unless-stopped
+
+  # ============================================
+  # 4. NEO4J (графовая БД)
+  # ============================================
+  neo4j:
+    image: neo4j:5-enterprise
+    container_name: news-neo4j
+    environment:
+      - NEO4J_AUTH=neo4j/StrongPwd123
+      - NEO4J_dbms_default__database=newsgraph
+      - NEO4J_dbms_memory_pagecache_size=2G
+      - NEO4J_dbms_memory_heap_initial__size=2G
+      - NEO4J_dbms_memory_heap_max__size=4G
+      - NEO4J_dbms_connector_https_advertised__address=:7473
+      - NEO4J_dbms_connector_http_advertised__address=:7474
+      - NEO4J_dbms_connector_bolt_advertised__address=:7687
+      - NEO4J_dbms_security_auth__enabled=true
+      - NEO4J_ACCEPT_LICENSE_AGREEMENT=yes
+    ports:
+      - "7474:7474"  # HTTP Browser
+      - "7687:7687"  # Bolt protocol
+    volumes:
+      - neo4j-data:/data
+      - neo4j-logs:/logs
+      - neo4j-import:/var/lib/neo4j/import
+      - ./neo4j/conf:/conf
+      - ./neo4j/plugins:/plugins
+    networks:
+      - news-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "cypher-shell -u neo4j -p StrongPwd123 'RETURN 1' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # ============================================
+  # 5. CLICKHOUSE (аналитическая БД)
+  # ============================================
+  clickhouse:
+    image: clickhouse/clickhouse-server:23.12
+    container_name: news-clickhouse
+    environment:
+      CLICKHOUSE_DB: newsdb
+      CLICKHOUSE_USER: analyst
+      CLICKHOUSE_PASSWORD: analyst123
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    ports:
+      - "8123:8123"  # HTTP API
+      - "9000:9000"  # Native protocol
+      - "9009:9009"  # Inter-server
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+      - ./clickhouse/config/config.xml:/etc/clickhouse-server/config.d/config.xml
+      - ./clickhouse/init:/docker-entrypoint-initdb.d
+    networks:
+      - news-network
+    restart: unless-stopped
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+
+  # ============================================
+  # 6. CLICKHOUSE UI (для визуализации)
+  # ============================================
+  clickhouse-ui:
+    image: simplemail/clickhouse-web:latest
+    container_name: news-clickhouse-ui
+    depends_on:
+      - clickhouse
+    environment:
+      - CLICKHOUSE_HOST=clickhouse
+      - CLICKHOUSE_PORT=8123
+      - CLICKHOUSE_USER=analyst
+      - CLICKHOUSE_PASSWORD=analyst123
+    ports:
+      - "8082:8080"
+    networks:
+      - news-network
+    restart: unless-stopped
+
+  # ============================================
+  # 7. POSTGRES (для Kafka Connect)
+  # ============================================
+  postgres:
+    image: postgres:15
+    container_name: news-postgres
+    environment:
+      POSTGRES_DB: connectdb
+      POSTGRES_USER: connectuser
+      POSTGRES_PASSWORD: connectpass
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - news-network
+    restart: unless-stopped
+
+  # ============================================
+  # 8. KAFKA CONNECT (ClickHouse Sink)
+  # ============================================
+  kafka-connect:
+    image: confluentinc/cp-kafka-connect:7.5.0
+    container_name: news-kafka-connect
+    depends_on:
+      - kafka
+      - clickhouse
+      - postgres
+    environment:
+      CONNECT_BOOTSTRAP_SERVERS: kafka:9093
+      CONNECT_REST_PORT: 8083
+      CONNECT_GROUP_ID: "clickhouse-sink-group"
+      CONNECT_CONFIG_STORAGE_TOPIC: "connect-configs"
+      CONNECT_OFFSET_STORAGE_TOPIC: "connect-offsets"
+      CONNECT_STATUS_STORAGE_TOPIC: "connect-status"
+      CONNECT_CONFIG_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_STATUS_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_KEY_CONVERTER: "org.apache.kafka.connect.json.JsonConverter"
+      CONNECT_VALUE_CONVERTER: "org.apache.kafka.connect.json.JsonConverter"
+      CONNECT_KEY_CONVERTER_SCHEMAS_ENABLE: "false"
+      CONNECT_VALUE_CONVERTER_SCHEMAS_ENABLE: "false"
+      CONNECT_PLUGIN_PATH: "/usr/share/java,/usr/share/confluent-hub-components"
+      CONNECT_REST_ADVERTISED_HOST_NAME: "kafka-connect"
+    ports:
+      - "8083:8083"
+    volumes:
+      - ./kafka-connect/plugins:/usr/share/confluent-hub-components
+    networks:
+      - news-network
+    restart: unless-stopped
+    command:
+      - bash
+      - -c
+      - |
+        confluent-hub install --no-prompt clickhouse/clickhouse-kafka-connect:1.1.0 || true
+        /etc/confluent/docker/run
+
+  # ============================================
+  # 9. GO СЕРВЕР (основной)
+  # ============================================
+  go-server:
+    build: ./go-server
+    container_name: news-go-server
+    depends_on:
+      neo4j:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+      clickhouse:
+        condition: service_started
+    environment:
+      # Neo4j
+      NEO4J_URI: bolt://neo4j:7687
+      NEO4J_USER: neo4j
+      NEO4J_PASSWORD: StrongPwd123
+      NEO4J_DATABASE: newsgraph
+      
+      # Kafka
+      KAFKA_BROKERS: kafka:9093
+      KAFKA_TOPIC_EVENTS: news.events
+      KAFKA_TOPIC_ANALYTICS: news.analytics
+      KAFKA_TOPIC_DLQ: news.dlq
+      KAFKA_CONSUMER_GROUP_NEO4J: neo4j-writer-group
+      KAFKA_CONSUMER_GROUP_CLICKHOUSE: clickhouse-writer-group
+      
+      # ClickHouse
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: 8123
+      CLICKHOUSE_USER: analyst
+      CLICKHOUSE_PASSWORD: analyst123
+      CLICKHOUSE_DB: newsdb
+      
+      # Сервер
+      HTTP_PORT: 8080
+      GENERATION_BATCH_SIZE: 1000
+      GENERATION_DELAY_MS: 10
+      
+      # Режимы
+      ENABLE_KAFKA_PRODUCER: "true"
+      ENABLE_KAFKA_CONSUMER_NEO4J: "true"
+      ENABLE_KAFKA_CONSUMER_CLICKHOUSE: "false"  # используем Kafka Connect
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./go-server/data:/app/data
+      - ./go-server/logs:/app/logs
+    networks:
+      - news-network
+    restart: unless-stopped
+
+  # ============================================
+  # 10. KAFKA STREAMS (отдельный сервис)
+  # ============================================
+  kafka-streams:
+    build: ./kafka-streams
+    container_name: news-kafka-streams
+    depends_on:
+      - kafka
+    environment:
+      KAFKA_BROKERS: kafka:9093
+      APPLICATION_ID: news-streams-app
+      SOURCE_TOPIC: news.events
+      TARGET_TOPIC: news.analytics
+      DLQ_TOPIC: news.dlq
+    networks:
+      - news-network
+    restart: unless-stopped
+
+  # ============================================
+  # 11. PROMETHEUS (мониторинг)
+  # ============================================
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: news-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./prometheus/data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    networks:
+      - news-network
+    restart: unless-stopped
+
+  # ============================================
+  # 12. GRAFANA (визуализация метрик)
+  # ============================================
+  grafana:
+    image: grafana/grafana:latest
+    container_name: news-grafana
+    depends_on:
+      - prometheus
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin123
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./grafana/data:/var/lib/grafana
+      - ./grafana/dashboards:/etc/grafana/provisioning/dashboards
+    networks:
+      - news-network
+    restart: unless-stopped
