@@ -2,6 +2,7 @@ import faust
 import json
 import logging
 from datetime import datetime, timezone
+from typing import Dict, Any
 
 logging.basicConfig(
     level=logging.INFO,
@@ -9,225 +10,166 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# ─────────────────────────────────────────
 # Faust приложение
-# id        — уникальное имя приложения
-# broker    — Kafka брокеры
-# ─────────────────────────────────────────
 app = faust.App(
-    id="transport-streams",
+    id="news-streams",
     broker="kafka://localhost:9092;localhost:9093;localhost:9094",
     value_serializer="raw",
 )
 
-# ─────────────────────────────────────────
 # Топики
-# ─────────────────────────────────────────
-# Входной топик — читаем отсюда
-transport_events_topic = app.topic(
-    "transport-events",
-    value_type=bytes,
-)
+news_events_topic = app.topic("news-events", value_type=bytes)
+enriched_topic = app.topic("news-enriched", value_type=bytes)
+aggregated_topic = app.topic("news-aggregated", value_type=bytes)
 
-# Выходной топик 1 — результат трансформации
-enriched_topic = app.topic(
-    "transport-enriched",
-    value_type=bytes,
-)
-
-# Выходной топик 2 — результат агрегации и оконного вычисления
-aggregated_topic = app.topic(
-    "crash-aggregated",
-    value_type=bytes,
-)
-
-# ─────────────────────────────────────────
-# Справочник машин (имитация KTable lookup)
-# В реальном проекте это читалось бы из БД
-# ─────────────────────────────────────────
-VEHICLE_INFO = {
-    "vehicle-001": {"vehicleType": "BUS",   "region": "North", "capacity": 50},
-    "vehicle-002": {"vehicleType": "TRUCK", "region": "South", "capacity": 10},
-    "vehicle-003": {"vehicleType": "CAR",   "region": "East",  "capacity": 5},
-    "vehicle-004": {"vehicleType": "BUS",   "region": "West",  "capacity": 50},
-    "vehicle-005": {"vehicleType": "TRUCK", "region": "North", "capacity": 10},
+# Справочник источников (имитация KTable lookup)
+SOURCES_INFO = {
+    "reuters": {"region": "Global", "reliability": "HIGH", "factCheck": 9.5},
+    "bbc": {"region": "Europe", "reliability": "HIGH", "factCheck": 9.0},
+    "cnn": {"region": "Americas", "reliability": "MEDIUM", "factCheck": 7.5},
+    "aljazeera": {"region": "MiddleEast", "reliability": "HIGH", "factCheck": 8.5},
+    "tass": {"region": "Russia", "reliability": "MEDIUM", "factCheck": 6.0},
 }
 
-# ─────────────────────────────────────────
-# Таблица для агрегации
-# Хранит количество аварий по регионам
-# Персистентная — сохраняется в Kafka топик
-# ─────────────────────────────────────────
-crash_counts = app.Table(
-    "crash-counts-by-region",
+# Таблицы для агрегации
+category_counts = app.Table("news-counts-by-category", default=int)
+region_counts = app.Table("news-counts-by-region", default=int)
+
+# Оконное вычисление (Tumbling window - 60 секунд)
+trending_window = app.Table(
+    "trending-news-window",
     default=int,
-    help="Aggregation: crash count per region",
-)
-
-# ─────────────────────────────────────────
-# Таблица для оконного вычисления
-# Tumbling window — 60 секунд
-# Считаем аварии за каждую минуту
-# ─────────────────────────────────────────
-crash_window = app.Table(
-    "crash-window-counts",
-    default=int,
-    help="Windowed: crash count per minute window",
-).tumbling(60.0, expires=300.0)  # окно 60 сек, хранить 5 минут
+    help="Windowed: trending news per minute"
+).tumbling(60.0, expires=300.0)
 
 
-# ═══════════════════════════════════════════════════════
-# ТРАНСФОРМАЦИЯ
-# Читаем transport-events → обогащаем данными о машине
-# → пишем в transport-enriched
-#
-# Что добавляем: vehicleType, region, capacity, riskLevel
-# ═══════════════════════════════════════════════════════
-@app.agent(transport_events_topic, sink=[enriched_topic])
-async def enrich_events(events):
+# ТРАНСФОРМАЦИЯ: Обогащение новостей
+def compute_credibility_score(event: dict, source_info: dict) -> float:
+    """Вычисление credibility score на основе источника и типа события"""
+    base_score = source_info.get("factCheck", 5.0)
+    
+    if event.get("eventType") == "NewsPublished":
+        return base_score
+    elif event.get("eventType") == "NewsUpdated":
+        update_type = event.get("payload", {}).get("updateType")
+        if update_type == "fact_check":
+            return base_score + 1.0
+        return base_score - 0.5
+    elif event.get("eventType") == "NewsTrending":
+        trending_score = event.get("payload", {}).get("trendingScore", 0)
+        return min(10.0, base_score + (trending_score - 80) / 20)
+    return base_score
+
+
+@app.agent(news_events_topic, sink=[enriched_topic])
+async def enrich_news(events):
     async for event_bytes in events:
         try:
             event = json.loads(event_bytes.decode("utf-8"))
-            payload = event.get("payload", {})
-            vehicle_id = payload.get("vehicleId", "unknown")
-
-            # Получаем доп. инфо о машине из справочника
-            vehicle_info = VEHICLE_INFO.get(vehicle_id, {
-                "vehicleType": "UNKNOWN",
-                "region": "UNKNOWN",
-                "capacity": 0,
+            source_id = event.get("source", "unknown")
+            
+            source_info = SOURCES_INFO.get(source_id, {
+                "region": "Unknown",
+                "reliability": "LOW",
+                "factCheck": 5.0,
             })
-
-            # ТРАНСФОРМАЦИЯ — добавляем новые поля к событию
+            
+            # ТРАНСФОРМАЦИЯ: добавляем новые поля
             enriched = {
                 **event,
                 "enriched": True,
-                "vehicleType": vehicle_info["vehicleType"],
-                "region":      vehicle_info["region"],
-                "capacity":    vehicle_info["capacity"],
-                # Вычисляем уровень риска на основе типа события и машины
-                "riskLevel":   compute_risk_level(event, vehicle_info),
+                "sourceRegion": source_info["region"],
+                "sourceReliability": source_info["reliability"],
+                "credibilityScore": compute_credibility_score(event, source_info),
+                "processedAt": datetime.now(timezone.utc).isoformat(),
             }
-
+            
             logger.info(
                 f"[TRANSFORM] {event['eventType']} | "
-                f"vehicle={vehicle_id} | "
-                f"region={vehicle_info['region']} | "
-                f"risk={enriched['riskLevel']}"
+                f"source={source_id} | "
+                f"region={source_info['region']} | "
+                f"credibility={enriched['credibilityScore']}"
             )
-            # Отдаёт результат и ждёт следующее событие
+            
             yield json.dumps(enriched).encode("utf-8")
-
+            
         except Exception as e:
             logger.error(f"[TRANSFORM] Error: {e}")
 
 
-def compute_risk_level(event: dict, vehicle_info: dict) -> str:
-    """
-    Трансформация: вычисляем уровень риска события.
-    Логика зависит от типа события и типа транспорта.
-    """
-    event_type   = event.get("eventType")
-    payload      = event.get("payload", {})
-    vehicle_type = vehicle_info.get("vehicleType", "UNKNOWN")
-
-    if event_type == "CrashDetected":
-        severity = payload.get("severity", "LOW")
-        # Автобусы и грузовики — выше риск из-за количества людей
-        if vehicle_type in ("BUS", "TRUCK") and severity in ("HIGH", "CRITICAL"):
-            return "CRITICAL"
-        if severity == "CRITICAL":
-            return "HIGH"
-        if severity == "HIGH":
-            return "MEDIUM"
-        return "LOW"
-
-    elif event_type == "LocationUpdated":
-        speed = payload.get("speed", 0)
-        if speed > 100:
-            return "MEDIUM"   # превышение скорости
-        return "LOW"
-
-    return "LOW"
-
-
-# ═══════════════════════════════════════════════════════
 # АГРЕГАЦИЯ + ОКОННОЕ ВЫЧИСЛЕНИЕ
-# Читаем transport-enriched → считаем аварии
-# → пишем результат в crash-aggregated
-#
-# Агрегация:    общий счётчик аварий по регионам
-# Оконное:      аварии за последние 60 секунд
-# ═══════════════════════════════════════════════════════
 @app.agent(enriched_topic)
-async def aggregate_crashes(events):
+async def aggregate_news(events):
     async for event_bytes in events:
         try:
             event = json.loads(event_bytes.decode("utf-8"))
-
-            # Обрабатываем только аварии
-            if event.get("eventType") != "CrashDetected":
-                continue
-
-            region     = event.get("region", "UNKNOWN")
-            vehicle_id = event.get("payload", {}).get("vehicleId", "unknown")
-            severity   = event.get("payload", {}).get("severity", "LOW")
-
-            # АГРЕГАЦИЯ — общий счётчик по регионам (без окна)
-            crash_counts[region] += 1
-            total = crash_counts[region]
-
-            # ОКОННОЕ ВЫЧИСЛЕНИЕ — счётчик за текущее окно 60 сек
-            crash_window[region] += 1
-            window_count = crash_window[region].current()
-
-            logger.info(
-                f"[AGGREGATE] CrashDetected | "
-                f"region={region} | vehicle={vehicle_id} | "
-                f"severity={severity} | "
-                f"total_crashes={total} | "
-                f"window_crashes(60s)={window_count}"
-            )
-
-            # Формируем результат с явной схемой для JDBC Sink
+            
+            # Агрегируем только опубликованные новости
+            if event.get("eventType") == "NewsPublished":
+                payload = event.get("payload", {})
+                category = payload.get("category", "Unknown")
+                source_region = event.get("sourceRegion", "Unknown")
+                
+                # АГРЕГАЦИЯ 1: по категориям
+                category_counts[category] += 1
+                total_by_category = category_counts[category]
+                
+                # АГРЕГАЦИЯ 2: по регионам
+                region_counts[source_region] += 1
+                total_by_region = region_counts[source_region]
+                
+                logger.info(
+                    f"[AGGREGATE] NewsPublished | "
+                    f"category={category} | total={total_by_category} | "
+                    f"region={source_region} | region_total={total_by_region}"
+                )
+            
+            # ОКОННОЕ ВЫЧИСЛЕНИЕ: трендовые новости за минуту
+            if event.get("eventType") == "NewsTrending":
+                source_id = event.get("source", "unknown")
+                trending_window[source_id] += 1
+                window_count = trending_window[source_id].current()
+                
+                logger.info(
+                    f"[WINDOW] Trending news | "
+                    f"source={source_id} | "
+                    f"window_count(60s)={window_count}"
+                )
+            
+            # Отправляем агрегированный результат
             result = {
                 "schema": {
                     "type": "struct",
                     "optional": False,
                     "fields": [
-                        {"field": "eventType",     "type": "string", "optional": True},
-                        {"field": "timestamp",     "type": "string", "optional": True},
-                        {"field": "region",        "type": "string", "optional": True},
-                        {"field": "vehicleId",     "type": "string", "optional": True},
-                        {"field": "severity",      "type": "string", "optional": True},
-                        {"field": "totalCrashes",  "type": "int32",  "optional": True},
-                        {"field": "windowCrashes", "type": "int32",  "optional": True},
-                        {"field": "windowSeconds", "type": "int32",  "optional": True},
+                        {"field": "timestamp", "type": "string", "optional": True},
+                        {"field": "eventType", "type": "string", "optional": True},
+                        {"field": "category", "type": "string", "optional": True},
+                        {"field": "region", "type": "string", "optional": True},
+                        {"field": "totalByCategory", "type": "int32", "optional": True},
+                        {"field": "totalByRegion", "type": "int32", "optional": True},
+                        {"field": "trendingCount", "type": "int32", "optional": True},
                     ]
                 },
                 "payload": {
-                    "eventType":      "CrashAggregation",
-                    "timestamp":      datetime.now(timezone.utc).isoformat(),
-                    "region":         region,
-                    "vehicleId":      vehicle_id,
-                    "severity":       severity,
-                    "totalCrashes":   total,
-                    "windowCrashes":  window_count,
-                    "windowSeconds":  60,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "eventType": "NewsAggregation",
+                    "category": event.get("payload", {}).get("category", "N/A"),
+                    "region": event.get("sourceRegion", "N/A"),
+                    "totalByCategory": category_counts.get(event.get("payload", {}).get("category", "Unknown"), 0),
+                    "totalByRegion": region_counts.get(event.get("sourceRegion", "Unknown"), 0),
+                    "trendingCount": trending_window.get(event.get("source", "unknown"), 0),
                 }
             }
-            # Отправляем результат в crash-aggregated
+            
             await aggregated_topic.send(
-                key=region.encode("utf-8"),
+                key=event.get("source", "unknown").encode("utf-8"),
                 value=json.dumps(result).encode("utf-8"),
             )
-
+            
         except Exception as e:
             logger.error(f"[AGGREGATE] Error: {e}")
 
 
-# ─────────────────────────────────────────
-# Запуск
-# ─────────────────────────────────────────
 if __name__ == "__main__":
     app.main()
