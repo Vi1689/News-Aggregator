@@ -1,0 +1,67 @@
+# Топик с 3 партициями и репликацией на все 3 брокера
+docker exec -it kafka1 kafka-topics --create \
+  --bootstrap-server kafka1:19092 \
+  --topic test-topic \
+  --partitions 3 \
+  --replication-factor 3
+
+# Проверить что создался
+docker exec -it kafka1 kafka-topics --list \
+  --bootstrap-server kafka1:19092
+
+# Подробная инфо о топике
+docker exec -it kafka1 kafka-topics --describe \
+  --bootstrap-server kafka1:19092 \
+  --topic test-topic
+
+
+  
+
+# Открываем producer — пишем сообщения, каждая строка = одно сообщение
+docker exec -it kafka1 kafka-console-producer \
+  --bootstrap-server kafka1:19092 \
+  --topic test-topic
+```
+
+# Читаем с самого начала
+docker exec -it kafka1 kafka-console-consumer \
+  --bootstrap-server kafka1:19092 \
+  --topic test-topic \
+  --from-beginning
+
+
+docker exec -it kafka1 ls /var/lib/kafka/data/ | grep test-topic
+docker exec -it kafka1 ls -lh /var/lib/kafka/data/test-topic-0/
+
+конфиг
+docker exec -it kafka1 cat /etc/kafka/kafka.properties
+
+docker-compose stop
+docker-compose start
+http://localhost:8080
+
+# Producer
+python producer.py
+
+# Consumer Group 1
+python consumer.py group1
+
+# Consumer Group 2
+python consumer.py group2
+
+# Streams
+python streams.py worker -l info
+
+
+
+
+
+
+
+
+
+docker exec -it postgres psql -U transport -d transport_db -c "\dt"
+Покажет все таблицы.
+Посмотреть конкретную таблицу:
+docker exec -it postgres psql -U transport -d transport_db -c "SELECT * FROM vehicles;"
+docker exec -it postgres psql -U transport -d transport_db -c "SELECT * FROM \"crash-aggregated\" LIMIT 10;"

@@ -1,0 +1,80 @@
+Создать Sink коннектор (Kafka → PostgreSQL):
+bashcurl -X POST http://localhost:8083/connectors \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "transport-sink",
+    "config": {
+      "connector.class": "io.confluent.connect.jdbc.JdbcSinkConnector",
+      "tasks.max": "1",
+      "topics": "crash-aggregated",
+      "connection.url": "jdbc:postgresql://postgres:5432/transport_db",
+      "connection.user": "transport",
+      "connection.password": "transport123",
+      "auto.create": "true",
+      "auto.evolve": "true",
+      "insert.mode": "insert",
+      "pk.mode": "none",
+      "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+      "value.converter.schemas.enable": "true",
+      "key.converter": "org.apache.kafka.connect.storage.StringConverter"
+    }
+  }'
+
+
+
+Создать Source коннектор (PostgreSQL → Kafka):
+bashcurl -X POST http://localhost:8083/connectors \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "transport-source",
+    "config": {
+      "connector.class": "io.confluent.connect.jdbc.JdbcSourceConnector",
+      "tasks.max": "1",
+      "connection.url": "jdbc:postgresql://postgres:5432/transport_db",
+      "connection.user": "transport",
+      "connection.password": "transport123",
+      "mode": "bulk",
+      "table.whitelist": "vehicles",
+      "topic.prefix": "postgres-",
+      "poll.interval.ms": "10000",
+      "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+      "value.converter.schemas.enable": "false",
+      "key.converter": "org.apache.kafka.connect.storage.StringConverter"
+    }
+  }'
+
+
+
+
+
+
+
+
+
+Проверить статус:
+bashcurl http://localhost:8083/connectors?expand=status
+Удалить коннектор:
+bashcurl -X DELETE http://localhost:8083/connectors/transport-sink
+curl -X DELETE http://localhost:8083/connectors/transport-source
+Перезапустить коннектор:
+bashcurl -X POST http://localhost:8083/connectors/transport-sink/restart
+
+
+
+
+
+
+
+
+
+почитать что в постгрес скинулось
+docker exec -it postgres psql -U transport -d transport_db -c "SELECT * FROM \"crash-aggregated\" LIMIT 5;"
+docker exec -it postgres psql -U transport -d transport_db -c "SELECT COUNT(*) FROM \"crash-aggregated\";"
+
+в кафку
+docker exec -it postgres psql -U transport -d transport_db -c "SELECT * FROM vehicles;"
+
+новое в кафку 
+docker exec -it postgres psql -U transport -d transport_db -c "
+INSERT INTO vehicles (vehicle_id, vehicle_type, region) 
+VALUES ('vehicle-006', 'CAR', 'South');"
