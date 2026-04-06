@@ -98,7 +98,12 @@ func (c *ClickHouseClient) InsertEvent(ctx context.Context, event models.EventWr
 			}
 		}
 		if payload, ok := event.Payload["publishedAt"]; ok {
-			publishedAt = payload.(time.Time)
+			switch v := payload.(type) {
+			case time.Time:
+				publishedAt = v
+			case string:
+				publishedAt, _ = time.Parse(time.RFC3339, v)
+			}
 		}
 
 	case "NewsViewed":

@@ -264,7 +264,7 @@ services:
       # Режимы
       ENABLE_KAFKA_PRODUCER: "true"
       ENABLE_KAFKA_CONSUMER_NEO4J: "true"
-      ENABLE_KAFKA_CONSUMER_CLICKHOUSE: "false"  # используем Kafka Connect
+      ENABLE_KAFKA_CONSUMER_CLICKHOUSE: "true"  # используем Kafka Connect
     ports:
       - "8080:8080"
     volumes:

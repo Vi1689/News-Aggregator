@@ -86,3 +86,13 @@ Kafka UI	    http://localhost:8081	—       —
 ClickHouse UI	http://localhost:8082	analyst	12345678
 Grafana	        http://localhost:3000	admin	12345678
 Prometheus	    http://localhost:9090	—       —
+
+
+
+
+
+
+
+docker exec -i news-clickhouse clickhouse-client --user analyst --password 12345678 --multiquery < clickhouse/init/01_init.sql
+
+docker exec news-clickhouse clickhouse-client --user analyst --password 12345678 --query "SHOW TABLES FROM newsdb"

@@ -87,7 +87,7 @@ func Load() *Config {
 		// Флаги
 		EnableKafkaProducer:           getEnvBool("ENABLE_KAFKA_PRODUCER", true),
 		EnableKafkaConsumerNeo4j:      getEnvBool("ENABLE_KAFKA_CONSUMER_NEO4J", true),
-		EnableKafkaConsumerClickHouse: getEnvBool("ENABLE_KAFKA_CONSUMER_CLICKHOUSE", false),
+		EnableKafkaConsumerClickHouse: getEnvBool("ENABLE_KAFKA_CONSUMER_CLICKHOUSE", true),
 	}
 }
 
