@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 KAFKA_CONFIG = {
     "bootstrap.servers": "localhost:9092,localhost:9093,localhost:9094",
     "acks": "all",
-    "retries": 3,
+    "retries": 2,
     "retry.backoff.ms": 500,
     "compression.type": "gzip",
     "linger.ms": 10,

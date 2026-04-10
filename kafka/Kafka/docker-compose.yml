@@ -59,10 +59,10 @@ services:
       KAFKA_LOG4J_LOGGERS: "kafka.controller=INFO,kafka.producer.async.DefaultEventHandler=INFO,state.change.logger=INFO"
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
       KAFKA_NUM_PARTITIONS: "3"
-      KAFKA_DEFAULT_REPLICATION_FACTOR: "3"
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+      KAFKA_DEFAULT_REPLICATION_FACTOR: "2"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 2
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 2
-      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
     volumes:
       - kafka1-data:/var/lib/kafka/data
     depends_on:
@@ -85,10 +85,10 @@ services:
       KAFKA_LOG4J_LOGGERS: "kafka.controller=INFO,kafka.producer.async.DefaultEventHandler=INFO,state.change.logger=INFO"
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
       KAFKA_NUM_PARTITIONS: "3"
-      KAFKA_DEFAULT_REPLICATION_FACTOR: "3"
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+      KAFKA_DEFAULT_REPLICATION_FACTOR: "2"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 2
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 2
-      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
     volumes:
       - kafka2-data:/var/lib/kafka/data
     depends_on:
@@ -111,10 +111,10 @@ services:
       KAFKA_LOG4J_LOGGERS: "kafka.controller=INFO,kafka.producer.async.DefaultEventHandler=INFO,state.change.logger=INFO"
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
       KAFKA_NUM_PARTITIONS: "3"
-      KAFKA_DEFAULT_REPLICATION_FACTOR: "3"
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+      KAFKA_DEFAULT_REPLICATION_FACTOR: "2"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 2
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 2
-      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
     volumes:
       - kafka3-data:/var/lib/kafka/data
     depends_on:
@@ -140,6 +140,7 @@ services:
     image: confluentinc/cp-kafka-connect:7.8.7
     hostname: kafka-connect
     container_name: kafka-connect
+    user: root
     ports:
       - "8083:8083"
     environment:
@@ -160,13 +161,17 @@ services:
       CONNECT_INTERNAL_VALUE_CONVERTER: org.apache.kafka.connect.json.JsonConverter
       CONNECT_PLUGIN_PATH: "/usr/share/java,/usr/share/confluent-hub-components"
     command:
-      - bash
+      - sh
       - -c
       - |
-        echo "Installing JDBC connector plugin..."
+        mkdir -p /usr/share/confluent-hub-components
+        chmod 777 /usr/share/confluent-hub-components
+        echo "Installing JDBC connector..."
         confluent-hub install --no-prompt confluentinc/kafka-connect-jdbc:10.7.4
         echo "Starting Kafka Connect..."
         /etc/confluent/docker/run
+    volumes:
+      - ./jdbc-plugins:/usr/share/confluent-hub-components
     depends_on:
       - kafka1
       - kafka2

@@ -13,7 +13,7 @@ BOOTSTRAP_SERVERS = "localhost:9092,localhost:9093,localhost:9094"
 TOPIC_MAIN = "news-events"
 TOPIC_DLQ = "news-dlq"
 
-MAX_RETRIES = 3
+MAX_RETRIES = 2
 
 # Producer для DLQ
 dlq_producer = Producer({

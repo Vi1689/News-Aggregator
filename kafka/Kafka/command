@@ -65,3 +65,53 @@ docker exec -it postgres psql -U transport -d transport_db -c "\dt"
 Посмотреть конкретную таблицу:
 docker exec -it postgres psql -U transport -d transport_db -c "SELECT * FROM vehicles;"
 docker exec -it postgres psql -U transport -d transport_db -c "SELECT * FROM \"crash-aggregated\" LIMIT 10;"
+
+
+curl -X POST http://localhost:8083/connectors \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "news-enriched-sink",
+    "config": {
+      "connector.class": "io.confluent.connect.jdbc.JdbcSinkConnector",
+      "tasks.max": "1",
+      "topics": "news-enriched",
+      "connection.url": "jdbc:postgresql://postgres:5432/news_db",
+      "connection.user": "news_user",
+      "connection.password": "news_password",
+      "auto.create": "true",
+      "auto.evolve": "true",
+      "insert.mode": "insert",
+      "pk.mode": "none",
+      "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+      "value.converter.schemas.enable": "false",
+      "key.converter": "org.apache.kafka.connect.storage.StringConverter",
+      "errors.tolerance": "all",
+      "errors.deadletterqueue.topic.name": "dlq-news-enriched",
+      "errors.deadletterqueue.topic.replication.factor": "1"
+    }
+  }'
+
+
+curl -X POST http://localhost:8083/connectors \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "news-sources-source",
+    "config": {
+      "connector.class": "io.confluent.connect.jdbc.JdbcSourceConnector",
+      "tasks.max": "1",
+      "connection.url": "jdbc:postgresql://postgres:5432/news_db",
+      "connection.user": "news_user",
+      "connection.password": "news_password",
+      "mode": "bulk",
+      "table.whitelist": "news_sources",
+      "topic.prefix": "postgres-",
+      "poll.interval.ms": "30000",
+      "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+      "value.converter.schemas.enable": "false",
+      "key.converter": "org.apache.kafka.connect.storage.StringConverter"
+    }
+  }'
+
+
+  docker exec -it postgres psql -U news_user -d news_db -c "\dt"
+docker exec -it postgres psql -U news_user -d news_db -c "SELECT * FROM articles LIMIT 10;"
