@@ -114,4 +114,16 @@ curl -X POST http://localhost:8083/connectors \
 
 
   docker exec -it postgres psql -U news_user -d news_db -c "\dt"
-docker exec -it postgres psql -U news_user -d news_db -c "SELECT * FROM articles LIMIT 10;"
+
+python producer.py
+
+python streams.py worker -l info
+
+docker exec kafka1 kafka-console-consumer \
+  --bootstrap-server kafka1:19092 \
+  --topic news-enriched \
+  --from-beginning \
+  --max-messages 2
+
+docker exec postgres psql -U news_user -d news_db -c "SELECT COUNT(*) FROM news_enriched;"
+docker exec postgres psql -U news_user -d news_db -c "SELECT eventtype, source, credibilityscore FROM news_enriched LIMIT 5;"
