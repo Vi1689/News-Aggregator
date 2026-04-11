@@ -127,3 +127,11 @@ docker exec kafka1 kafka-console-consumer \
 
 docker exec postgres psql -U news_user -d news_db -c "SELECT COUNT(*) FROM news_enriched;"
 docker exec postgres psql -U news_user -d news_db -c "SELECT eventtype, source, credibilityscore FROM news_enriched LIMIT 5;"
+
+
+
+# Все категории
+docker exec postgres psql -U news_user -d news_db -c "SELECT payload->>'category' as category, COUNT(*) FROM news_enriched GROUP BY category ORDER BY count DESC;"
+
+# Только за последние 30 секунд
+docker exec postgres psql -U news_user -d news_db -c "SELECT payload->>'category' as category, COUNT(*) FROM news_enriched WHERE created_at > NOW() - INTERVAL '30 seconds' GROUP BY category ORDER BY count DESC;"

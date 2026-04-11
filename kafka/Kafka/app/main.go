@@ -16,14 +16,14 @@ import (
 
 // NewsEvent — структура сообщения из топика news-enriched
 type NewsEvent struct {
-    EventId             string          `json:"eventId"`        // ID события из Kafka
-    EventType           string          `json:"eventType"`      // NewsPublished / NewsUpdated / NewsTrending
-    Timestamp           string          `json:"timestamp"`      // Время события
-    Source              string          `json:"source"`         // reuters, bbc, cnn, aljazeera, tass
-    Version             string          `json:"version"`        // Версия формата
-    EntryId             string          `json:"entryId"`        // Уникальный ID записи
-    Enriched            bool            `json:"enriched"`       // true (добавлено streams.py)
-    SourceRegion        string          `json:"sourceRegion"`   // Global, Europe, Americas и т.д.
+    EventId             string          `json:"eventId"`           // ID события из Kafka
+    EventType           string          `json:"eventType"`         // NewsPublished / NewsUpdated / NewsTrending
+    Timestamp           string          `json:"timestamp"`         // Время события
+    Source              string          `json:"source"`            // reuters, bbc, cnn, aljazeera, tass
+    Version             string          `json:"version"`           // Версия формата
+    EntryId             string          `json:"entryId"`           // Уникальный ID записи
+    Enriched            bool            `json:"enriched"`          // true (добавлено streams.py)
+    SourceRegion        string          `json:"sourceRegion"`  	   // Global, Europe, Americas и т.д.
     SourceReliability   string          `json:"sourceReliability"` // HIGH / MEDIUM
     CredibilityScore    float64         `json:"credibilityScore"`  // Оценка достоверности
     ProcessedAt         string          `json:"processedAt"`       // Время обработки
@@ -46,11 +46,11 @@ func (h *ConsumerGroupHandler) Cleanup(_ sarama.ConsumerGroupSession) error {
 }
 
 func (h *ConsumerGroupHandler) ConsumeClaim(session sarama.ConsumerGroupSession, claim sarama.ConsumerGroupClaim) error {
-	for msg := range claim.Messages() {
-		h.processMessage(msg)
-		session.MarkMessage(msg, "")
-	}
-	return nil
+    for msg := range claim.Messages() {        // Берём каждое сообщение из Kafka
+        h.processMessage(msg)                   // Обрабатываем его
+        session.MarkMessage(msg, "")            // Подтверждаем, что обработали (коммитим offset)
+    }
+    return nil
 }
 
 func (h *ConsumerGroupHandler) processMessage(msg *sarama.ConsumerMessage) {
